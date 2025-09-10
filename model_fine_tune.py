@@ -127,19 +127,10 @@ def compute_metrics(eval_pred):
     macro_f1 = f1_score(labels, preds, average='macro')
     weighted_f1 = f1_score(labels, preds, average='weighted')
     accuracy = accuracy_score(labels, preds)
-    
-    logits = predictions.astype(np.float64)
-    logits_max = logits.max(axis=1, keepdims=True)
-    shifted = logits - logits_max
-    log_sum_exp = np.log(np.exp(shifted).sum(axis=1, keepdims=True))
-    log_probs = shifted - log_sum_exp
-    ce_loss = -log_probs[np.arange(len(labels)), labels].mean()
-    
     return {
         "accuracy": accuracy,
         "macro_f1": macro_f1,
         "weighted_f1": weighted_f1,
-        "ce_loss": float(ce_loss),
     }
 
 
