@@ -17,7 +17,8 @@ from transformers import (
     AutoModelForSequenceClassification,
     TrainingArguments,
     Trainer,
-    DataCollatorWithPadding
+    DataCollatorWithPadding,
+    EarlyStoppingCallback
 )
 from peft import (
     LoraConfig, 
@@ -362,6 +363,7 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
         compute_metrics=compute_metrics,
         focal_gamma=params["focal_gamma"],
         loss_reduction=params["loss_reduction"],
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=params['early_stopping_patience'], early_stopping_threshold=params['early_stopping_threshold'])]
     )
 
     # MLflow logging
@@ -411,6 +413,9 @@ if __name__ == "__main__":
         "min_weight": 1.0,
 
         "max_length": 256,
+
+        "early_stopping_patience": 9,
+        "early_stopping_threshold": 0.001,
 
         "experiment_name": "ex02_ce_lr_0.00002",
         "experiment_description": "Cross entropy loss, smaller learning rate, smaller weight decay, ",
