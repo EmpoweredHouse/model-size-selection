@@ -14,4 +14,5 @@ dependencies = [
     "torch>=2.8.0",
     "tqdm>=4.67.1",
     "transformers>=4.56.1",
+    "mlflow>=2.16.2",
 ]
