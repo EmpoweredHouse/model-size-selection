@@ -25,6 +25,10 @@ from peft import (
     TaskType
 )
 
+import mlflow
+import mlflow.transformers
+
+from dotenv import load_dotenv, find_dotenv
 
 
 warnings.filterwarnings('ignore')
@@ -85,7 +89,6 @@ def detect_device():
         device = "mps" 
     else:
         device = "cpu"
-    
     return device
 
 
@@ -263,7 +266,14 @@ def build_contextual_dataset(dataset):
 
 
 def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="checkpoints"):
+    load_dotenv(find_dotenv())
     device = detect_device()
+
+    # MLflow setup
+    if os.environ.get("MLFLOW_TRACKING_URI"):
+        mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
+    mlflow.set_experiment(params.get("logging_experiment_name"))
+    mlflow.transformers.autolog(log_models=True)
 
     # Load MNLI
     dataset = load_dataset("nyu-mll/glue", "mnli")
@@ -316,8 +326,8 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
     checkpoint_output_dir = f"./{checkpoints_base_dir}/{params['experiment_name']}"
     class_weights_tensor = calculate_class_weights(train_labels, params["max_weight"], params["min_weight"]).to(device)
     total_steps = params["no_epochs"] * np.ceil(len(tokenized_datasets["train"]) / params["batch_size"])
-    eval_steps = int(total_steps // params["no_epochs"] // 4)
-    save_steps = int(eval_steps * 2)
+    eval_steps = int(total_steps // params["no_epochs"] // 2)
+    save_steps = int(eval_steps * 1)
     logging_steps = int(total_steps // params["no_epochs"] // 12)
     advanced_training_args = TrainingArguments(
         output_dir=checkpoint_output_dir,
@@ -326,7 +336,7 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
         load_best_model_at_end=True,
         metric_for_best_model="macro_f1",
         greater_is_better=True,
-        report_to=None,
+        report_to=["mlflow"],
         remove_unused_columns=False, # Required for custom trainer
         dataloader_num_workers=0,    # Important for MPS compatibility
         eval_steps=eval_steps,
@@ -353,27 +363,41 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
         loss_reduction=params["loss_reduction"],
     )
 
-    # Train
-    print(f"\nStarting advanced training with:")
-    print(params)
-    advanced_result = advanced_trainer.train()
-    print(f"\nAdvanced training completed!")    
-    print(f"Final train loss: {advanced_result.training_loss:.4f}")
+    # MLflow logging
+    with mlflow.start_run(run_name=params.get("experiment_name")):
+        # mlflow.log_params(params)
+        # Train
+        print(f"\nStarting advanced training with:")
+        print(params)
+        advanced_result = advanced_trainer.train()
+        print(f"\nAdvanced training completed!")    
+        print(f"Final train loss: {advanced_result.training_loss:.4f}")
 
-    comprehensive_evaluation(advanced_trainer, tokenized_datasets, params, results_base_dir=results_base_dir)
+        # Save checkpoint
+        best_ckpt = advanced_trainer.state.best_model_checkpoint
+        print(f"{best_ckpt=}")
+        if best_ckpt:
+            print(f"Saving best checkpoint to {best_ckpt}")
+            mlflow.log_artifacts(best_ckpt, artifact_path="best_checkpoint")
+
+        # Evaluate and log
+        comprehensive_evaluation(advanced_trainer, tokenized_datasets, params, results_base_dir=results_base_dir)
+        result_dir = f"{results_base_dir}/{params['experiment_name']}"
+        if os.path.isdir(result_dir):
+            mlflow.log_artifacts(result_dir, artifact_path="results")
 
 
 if __name__ == "__main__":
     params = {
         "model_name": "distilbert-base-uncased",
 
-        "no_epochs": 2,
+        "no_epochs": 8,
         "batch_size": 32,
         "learning_rate": 0.0001,
-        "warmup_steps": 0.10,
+        "warmup_steps": 0.05,
         "weight_decay": 0.02,
 
-        "enable_lora": True,
+        "enable_lora": False,
         "target_modules": ["q_lin", "v_lin", "k_lin", "out_lin"],
         "lora_dropout": 0.10,
         "lora_r": 64,
@@ -389,6 +413,7 @@ if __name__ == "__main__":
 
         "experiment_name": "ex01_baseline",
         "experiment_description": "Baseline experiment",
+        "logging_experiment_name": "/Shared/SLMs",
     }
     fine_tune_model(params)
     print("Done")
