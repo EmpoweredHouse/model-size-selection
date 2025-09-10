@@ -2,3 +2,5 @@
 results/
 .venv/
 tmp/
+**results/
+**checkpoints/
