@@ -122,16 +122,24 @@ def calculate_class_weights(train_labels, max_weight, min_weight):
 
 def compute_metrics(eval_pred):
     predictions, labels = eval_pred
-    predictions = np.argmax(predictions, axis=1)
+    preds = np.argmax(predictions, axis=1)
     
-    macro_f1 = f1_score(labels, predictions, average='macro')
-    weighted_f1 = f1_score(labels, predictions, average='weighted')
-    accuracy = accuracy_score(labels, predictions)
+    macro_f1 = f1_score(labels, preds, average='macro')
+    weighted_f1 = f1_score(labels, preds, average='weighted')
+    accuracy = accuracy_score(labels, preds)
+    
+    logits = predictions.astype(np.float64)
+    logits_max = logits.max(axis=1, keepdims=True)
+    shifted = logits - logits_max
+    log_sum_exp = np.log(np.exp(shifted).sum(axis=1, keepdims=True))
+    log_probs = shifted - log_sum_exp
+    ce_loss = -log_probs[np.arange(len(labels)), labels].mean()
     
     return {
         "accuracy": accuracy,
         "macro_f1": macro_f1,
-        "weighted_f1": weighted_f1
+        "weighted_f1": weighted_f1,
+        "ce_loss": float(ce_loss),
     }
 
 
@@ -326,21 +334,19 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
     checkpoint_output_dir = f"./{checkpoints_base_dir}/{params['experiment_name']}"
     class_weights_tensor = calculate_class_weights(train_labels, params["max_weight"], params["min_weight"]).to(device)
     total_steps = params["no_epochs"] * np.ceil(len(tokenized_datasets["train"]) / params["batch_size"])
-    eval_steps = int(total_steps // params["no_epochs"] // 2)
-    save_steps = int(eval_steps * 1)
+    eval_steps = int(total_steps // params["no_epochs"] // 6)
+    save_steps = int(eval_steps)
     logging_steps = int(total_steps // params["no_epochs"] // 12)
     advanced_training_args = TrainingArguments(
         output_dir=checkpoint_output_dir,
-        save_strategy="steps",
-        eval_strategy="steps",
         load_best_model_at_end=True,
         metric_for_best_model="macro_f1",
         greater_is_better=True,
-        report_to=["mlflow"],
-        remove_unused_columns=False, # Required for custom trainer
-        dataloader_num_workers=0,    # Important for MPS compatibility
-        eval_steps=eval_steps,
+        save_total_limit=3,
+        save_strategy="steps",
         save_steps=save_steps,
+        eval_strategy="steps",
+        eval_steps=eval_steps,
         logging_steps=logging_steps,
         learning_rate=params["learning_rate"],
         num_train_epochs=params["no_epochs"],
@@ -348,6 +354,10 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
         per_device_eval_batch_size=params["batch_size"],
         warmup_steps=int(params["warmup_steps"] * total_steps),
         weight_decay=params["weight_decay"],
+        fp16=True if device == "cuda" else False,
+        report_to=["mlflow"],
+        dataloader_num_workers=0,    # Important for MPS compatibility
+        remove_unused_columns=False, # Required for custom trainer
     )
     advanced_trainer = AdvancedTrainer(
         loss_type=params["loss_type"],
@@ -391,11 +401,11 @@ if __name__ == "__main__":
     params = {
         "model_name": "distilbert-base-uncased",
 
-        "no_epochs": 8,
+        "no_epochs": 5,
         "batch_size": 32,
-        "learning_rate": 0.0001,
+        "learning_rate": 0.00002,
         "warmup_steps": 0.05,
-        "weight_decay": 0.02,
+        "weight_decay": 0.01,
 
         "enable_lora": False,
         "target_modules": ["q_lin", "v_lin", "k_lin", "out_lin"],
@@ -403,16 +413,16 @@ if __name__ == "__main__":
         "lora_r": 64,
         "lora_alpha": 128,
 
-        "loss_type": "focal",
-        "focal_gamma": 2,
+        "loss_type": "ce",
         "loss_reduction": "mean",
+        "focal_gamma": 2,
         "max_weight": 1.0,
         "min_weight": 1.0,
 
         "max_length": 256,
 
-        "experiment_name": "ex01_baseline",
-        "experiment_description": "Baseline experiment",
+        "experiment_name": "ex02_ce_lr_0.00002",
+        "experiment_description": "Cross entropy loss, smaller learning rate, smaller weight decay, ",
         "logging_experiment_name": "/Shared/SLMs",
     }
     fine_tune_model(params)
