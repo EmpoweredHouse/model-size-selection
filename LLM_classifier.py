@@ -12,8 +12,8 @@ from tqdm import tqdm
 
 
 
-class ANLIClassification(BaseModel):
-    """Classification of ANLI dataset into one of 3 labels"""
+class MNLIClassification(BaseModel):
+    """Classification of MNLI dataset into one of 3 labels"""
     
     label: Literal["entailment", "neutral", "contradiction"] = Field(
         description="""Classify the utterance into one of these dialogue acts:
@@ -26,11 +26,11 @@ class ANLIClassification(BaseModel):
     )
 
 
-class BatchANLIClassification(BaseModel):
-    """Batch classification of ANLI dataset into one of 3 labels"""
+class BatchMNLIClassification(BaseModel):
+    """Batch classification of MNLI dataset into one of 3 labels"""
     
-    classifications: list[ANLIClassification] = Field(
-        description="List of ANLI dataset classifications, one for each input example in the same order"
+    classifications: list[MNLIClassification] = Field(
+        description="List of MNLI dataset classifications, one for each input example in the same order"
     )
 
 
@@ -44,7 +44,7 @@ def to_label_int(label_str: str) -> int:
     return mapping[label_str]
 
 
-def classification_comparison(test_ds, results: list[ANLIClassification]) -> str:
+def classification_comparison(test_ds, results: list[MNLIClassification]) -> str:
     comparison_str = ""
     for i, result in enumerate(results):
         comparison_str += (
@@ -52,23 +52,69 @@ def classification_comparison(test_ds, results: list[ANLIClassification]) -> str
             f"Predicted:     {result.label} ({to_label_int(result.label)}) {'✅' if to_label_int(result.label) == test_ds[i]['label'] else '❌'}\n"
             f"Premise:       {test_ds[i]['premise']}\n"
             f"Hypothesis:    {test_ds[i]['hypothesis']}\n"
-            f"True Reason:   {test_ds[i]['reason']}\n"
-            f"Model Reason:  {result.reasoning}\n{20*'-'}"
+            f"Model Reason:  {result.reasoning}\n{35*'-'}\n"
         )
     return comparison_str
 
 
 def get_fewshot_examples() -> list[dict]:
     return [
-        {"premise": "Haviland is a city in Kiowa County, Kansas, United States. As of the 2010 census, the city population was 701. It is home of Barclay College and known for meteorite finds connected to the Haviland Crater and for an annual meteorite festival held in July.", "hypothesis": "Barclay college is not located in Mississippi.", "label": "entailment"},
-        {"premise": "Oak Flats is a suburb of Shellharbour, New South Wales, Australia situated on the south western shores of Lake Illawarra and within the South Coast region of New South Wales. It is a residential area, which had a population of 6,415 at the 2016 census.", "hypothesis": "Oak Flats is a residential area.", "label": "entailment"},
-        {"premise": "Svein Holden (born 23 August 1973) is a Norwegian jurist having prosecuted several major criminal cases in Norway. Together with prosecutor Inga Bejer Engh Holden prosecuted terror suspect Anders Behring Breivik in the 2012 trial following the 2011 Norway attacks.", "hypothesis": "Sven Holden is a Norwegian jurist.", "label": "entailment"},
-        {"premise": "Jaime Federico Said Camil Saldaña da Gama (born 22 July 1973), known professionally as Jaime Camil, is a Mexican actor, singer and host. He is best known for his roles as Fernando Mendiola in \"La Fea Mas Bella\" and Rogelio de la Vega in \"Jane the Virgin.\"", "hypothesis": "Jaime Federico enjoyed acting in Jane the Virgin", "label": "neutral"},
-        {"premise": "The Opera Company of Boston was an American opera company located in Boston, Massachusetts, that was active from the late 1950s through the 1980s. The company was founded by American conductor Sarah Caldwell in 1958 under the name Boston Opera Group.", "hypothesis": "Boston Opera Group changed it's name in 1970.", "label": "neutral"},
-        {"premise": "The 2020 UEFA European Football Championship, commonly referred to as UEFA Euro 2020 or simply Euro 2020, will be the 16th edition of the UEFA European Championship, the quadrennial international men's football championship of Europe organized by UEFA.", "hypothesis": "Euro 2020 will be held somewhere in Germany. ", "label": "neutral"},
-        {"premise": "La Commune (Paris, 1871) is a 2000 historical drama film directed by Peter Watkins about the Paris Commune. A historical re-enactment in the style of a documentary, the film received much acclaim from critics for its political themes and Watkins' direction.", "hypothesis": "La Commune is 2001 drama.", "label": "contradiction"},
-        {"premise": "When I Was Born for the 7th Time is the third studio album by the British indie rock band Cornershop, released on 8 September 1997 by Wiiija. The album received high acclaim from music critics and features the international hit single \"Brimful of Asha\".", "hypothesis": "The album was not well liked by critics.", "label": "contradiction"},
-        {"premise": "Pain Killer is the sixth studio album by American country music group Little Big Town. It was released on October 21, 2014, through Capitol Nashville. Little Big Town co-wrote eight of the album's thirteen tracks. \"Pain Killer\" was produced by Jay Joyce.", "hypothesis": "Little Big Town produced their own album, Pain Killer.", "label": "contradiction"},
+        {
+            "premise": "The rule requires broadcasters to maintain a file for public inspection containing a Children's Television Programming Report and to identify programs specifically designed to educate and inform children.",
+            "hypothesis": "The rule makes broadcasters keep a file about children's television programming.",
+            "label": "entailment",
+            "reasoning": "The hypothesis paraphrases the requirement in the premise; no new conditions are introduced."
+        },
+        {
+            "premise": "In the crypt are interred the remains of Voltaire and Rousseau, Hugo and Zola, assassinated Socialist leader Jean Jaurès, and Louis Braille, the inventor of the alphabet for the blind.",
+            "hypothesis": "The remains of these figures are all interred in the crypt.",
+            "label": "entailment",
+            "reasoning": "The hypothesis summarizes exactly who the premise states is interred in the crypt."
+        },
+        {
+            "premise": "Get individuals to invest their time and the funding will follow.",
+            "hypothesis": "If individuals invest their time, funding will come along too.",
+            "label": "entailment",
+            "reasoning": "Logical restatement of the causal claim in the premise."
+        },
+
+        {
+            "premise": "He turned and smiled at Vrenna.",
+            "hypothesis": "He smiled at Vrenna who was walking slowly behind him with her mother.",
+            "label": "neutral",
+            "reasoning": "The hypothesis adds new details (walking slowly, mother) not supported or denied by the premise."
+        },
+        {
+            "premise": "Yeah, well, you're a student, right?",
+            "hypothesis": "Well, you're a mechanics student, right?",
+            "label": "neutral",
+            "reasoning": "The hypothesis specializes the field of study; the premise doesn’t confirm or deny that specialization."
+        },
+        {
+            "premise": "Back on the road to Jaisalmer, one last splash of color delights the senses—fields are dotted with mounds of red hot chili peppers.",
+            "hypothesis": "The road to Jaisalmer is bumpy and unpleasant to ride on.",
+            "label": "neutral",
+            "reasoning": "The premise discusses scenery; the hypothesis introduces road condition, which is unrelated."
+        },
+
+        {
+            "premise": "Fun for adults and children.",
+            "hypothesis": "Fun for only children.",
+            "label": "contradiction",
+            "reasoning": "‘Only children’ directly contradicts ‘adults and children.’"
+        },
+        {
+            "premise": "Almost every hill has a Moorish fort; and two more, still in good repair—the Atalaya and Galeras castles—protect the sea-front arsenal.",
+            "hypothesis": "There are no castles Atalaya and Galeras.",
+            "label": "contradiction",
+            "reasoning": "The premise asserts the existence of those castles; the hypothesis denies it."
+        },
+        {
+            "premise": "They can always join the military service; they are considered citizens, I believe.",
+            "hypothesis": "They can't join the military service.",
+            "label": "contradiction",
+            "reasoning": "The hypothesis negates the permission explicitly stated in the premise."
+        }
     ]
 
 
@@ -87,12 +133,13 @@ def build_system_prompt() -> str:
 def build_user_prompt(batch_items: list[dict], fewshot_examples: list[dict]) -> str:
     sections: list[str] = []
     if fewshot_examples:
-        sections.append("Few-shot labeled examples (for guidance, format: premise, hypothesis, label):")
+        sections.append("Few-shot labeled examples (for guidance, format: premise, hypothesis, label, reasoning):")
         sections.append(json.dumps([
             {
                 "premise": ex["premise"],
                 "hypothesis": ex["hypothesis"],
                 "label": ex["label"],
+                "reasoning": ex["reasoning"],
             }
             for ex in fewshot_examples
         ], ensure_ascii=False, indent=2))
@@ -114,7 +161,7 @@ def call_openai_classify_batch(
     model: str, 
     batch_items: list[dict], 
     fewshot_examples: list[dict]
-) -> BatchANLIClassification:
+) -> BatchMNLIClassification:
     messages = [
         {"role": "system", "content": build_system_prompt()},
         {"role": "user", "content": build_user_prompt(batch_items, fewshot_examples)},
@@ -127,17 +174,17 @@ def call_openai_classify_batch(
             "type": "json_schema",
             "json_schema": {
                 "name": "batch_dialogue_act_classification",
-                "schema": BatchANLIClassification.model_json_schema()
+                "schema": BatchMNLIClassification.model_json_schema()
             },
         },
     )
 
     content = completion.choices[0].message.content
     try:
-        parsed = BatchANLIClassification.model_validate_json(content)
+        parsed = BatchMNLIClassification.model_validate_json(content)
     except Exception:
         obj = json.loads(content)
-        parsed = BatchANLIClassification(**obj)
+        parsed = BatchMNLIClassification(**obj)
     return parsed
 
 
@@ -151,7 +198,7 @@ def run_classification(
     load_dotenv(find_dotenv())
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    test_ds = load_dataset("facebook/anli", split=f"test_r{round}")
+    test_ds = load_dataset("nyu-mll/glue", "mnli", split="validation_matched")
     test_inputs: list[dict] = [
         {"premise": ex["premise"], "hypothesis": ex["hypothesis"]}
         for ex in test_ds
@@ -162,7 +209,7 @@ def run_classification(
     if max_batches is not None:
         indices = indices[:max_batches]
 
-    results: list[ANLIClassification] = []
+    results: list[MNLIClassification] = []
     for start in tqdm(indices, desc="Classifying batches"):
         end = min(start + batch_size, total)
         batch_items = test_inputs[start:end]
@@ -197,8 +244,8 @@ if __name__ == "__main__":
     run_classification(
         round=1, 
         model="gpt-4o-mini", 
-        batch_size=10, 
-        max_batches=3, 
+        batch_size=1, 
+        max_batches=1000, 
         present_results="file"
     )
     
