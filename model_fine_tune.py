@@ -26,6 +26,7 @@ from peft import (
     get_peft_model, 
     TaskType
 )
+from huggingface_hub import login
 
 import mlflow
 import mlflow.transformers
@@ -272,8 +273,14 @@ def build_contextual_dataset(dataset):
 
 def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="checkpoints"):
     start_time = time.time()
-    load_dotenv(find_dotenv())
     device = detect_device()
+    load_dotenv(find_dotenv())
+
+    # HF login
+    try:
+        login(token=os.environ.get("HUGGINGFACE_HUB_TOKEN"), add_to_git_credential=False)
+    except Exception as e:
+        warnings.warn(f"Hugging Face login failed: {e}")
 
     # MLflow setup
     if os.environ.get("MLFLOW_TRACKING_URI"):
@@ -431,8 +438,8 @@ if __name__ == "__main__":
         "early_stopping_patience": 5,
         "early_stopping_threshold": 0.001,
 
-        "experiment_name": "ex03_gemma2b_lora_baseline",
-        "experiment_description": "Gemma 2B base + LoRA.",
+        "experiment_name": "ex04_gemma7b_lora_baseline",
+        "experiment_description": "Gemma 7B base + LoRA.",
         "logging_experiment_name": "/Shared/SLMs",
     }
     fine_tune_model(params)
