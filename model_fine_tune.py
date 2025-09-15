@@ -356,8 +356,8 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
         gradient_accumulation_steps=params["gradient_accumulation_steps"],
         warmup_steps=int(params["warmup_steps"] * total_update_steps),
         weight_decay=params["weight_decay"],
-        fp16=True if device == "cuda" else False,
-        bf16=torch.cuda.is_bf16_supported(),
+        fp16=True if device == "cuda" and not torch.cuda.is_bf16_supported() else False,
+        bf16=True if device == "cuda" and torch.cuda.is_bf16_supported() else False,
         report_to=["mlflow"],
         dataloader_num_workers=0,    # Important for MPS compatibility
         remove_unused_columns=False, # Required for custom trainer
