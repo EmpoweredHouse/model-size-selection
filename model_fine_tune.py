@@ -300,6 +300,8 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
 
     # Setup tokenizer and data collator
     tokenizer = AutoTokenizer.from_pretrained(params["model_name"])
+    if tokenizer.pad_token is None and hasattr(tokenizer, "eos_token") and tokenizer.eos_token is not None:
+        tokenizer.pad_token = tokenizer.eos_token
     special_tokens_dict = {"additional_special_tokens": ["[PREMISE]", "[HYPOTHESIS]"]}
     tokenizer.add_special_tokens(special_tokens_dict)
     model.resize_token_embeddings(len(tokenizer))
@@ -331,10 +333,11 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
     # Setup training
     checkpoint_output_dir = f"./{checkpoints_base_dir}/{params['experiment_name']}"
     class_weights_tensor = calculate_class_weights(train_labels, params["max_weight"], params["min_weight"]).to(device)
-    total_steps = params["no_epochs"] * np.ceil(len(tokenized_datasets["train"]) / params["batch_size"])
-    eval_steps = int(total_steps // params["no_epochs"] // 6)
+    update_steps_per_epoch = int(np.ceil(len(tokenized_datasets["train"]) / params["gradient_accumulation_steps"] / params["batch_size"]))
+    total_update_steps = int(params["no_epochs"] * update_steps_per_epoch)
+    eval_steps = max(1, int(update_steps_per_epoch // 6))
     save_steps = int(eval_steps)
-    logging_steps = int(total_steps // params["no_epochs"] // 12)
+    logging_steps = max(1, int(update_steps_per_epoch // 12))
     advanced_training_args = TrainingArguments(
         output_dir=checkpoint_output_dir,
         load_best_model_at_end=True,
@@ -350,9 +353,11 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
         num_train_epochs=params["no_epochs"],
         per_device_train_batch_size=params["batch_size"],
         per_device_eval_batch_size=params["batch_size"],
-        warmup_steps=int(params["warmup_steps"] * total_steps),
+        gradient_accumulation_steps=params["gradient_accumulation_steps"],
+        warmup_steps=int(params["warmup_steps"] * total_update_steps),
         weight_decay=params["weight_decay"],
         fp16=True if device == "cuda" else False,
+        bf16=torch.cuda.is_bf16_supported(),
         report_to=["mlflow"],
         dataloader_num_workers=0,    # Important for MPS compatibility
         remove_unused_columns=False, # Required for custom trainer
@@ -400,19 +405,20 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
 
 if __name__ == "__main__":
     params = {
-        "model_name": "distilbert-base-uncased",
+        "model_name": "google/gemma-2b",
 
-        "no_epochs": 5,
-        "batch_size": 32,
-        "learning_rate": 0.00002,
-        "warmup_steps": 0.05,
+        "no_epochs": 4,
+        "batch_size": 16,
+        "gradient_accumulation_steps": 16,
+        "learning_rate": 0.0002,
+        "warmup_steps": 0.03,
         "weight_decay": 0.01,
 
-        "enable_lora": False,
-        "target_modules": ["q_lin", "v_lin", "k_lin", "out_lin"],
-        "lora_dropout": 0.10,
-        "lora_r": 64,
-        "lora_alpha": 128,
+        "enable_lora": True,
+        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
+        "lora_dropout": 0.05,
+        "lora_r": 16,
+        "lora_alpha": 32,
 
         "loss_type": "ce",
         "loss_reduction": "mean",
@@ -420,13 +426,13 @@ if __name__ == "__main__":
         "max_weight": 1.0,
         "min_weight": 1.0,
 
-        "max_length": 256,
+        "max_length": 128,
 
-        "early_stopping_patience": 9,
+        "early_stopping_patience": 5,
         "early_stopping_threshold": 0.001,
 
-        "experiment_name": "ex02_ce_lr_0.00002",
-        "experiment_description": "Cross entropy loss, smaller learning rate, smaller weight decay, ",
+        "experiment_name": "ex03_gemma2b_lora_baseline",
+        "experiment_description": "Gemma 2B base + LoRA.",
         "logging_experiment_name": "/Shared/SLMs",
     }
     fine_tune_model(params)
