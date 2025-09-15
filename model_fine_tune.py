@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import warnings
 
 import numpy as np
@@ -135,7 +136,7 @@ def compute_metrics(eval_pred):
     }
 
 
-def comprehensive_evaluation(trainer, tokenized_datasets, hyperparams, results_base_dir="results"):
+def comprehensive_evaluation(trainer, tokenized_datasets, hyperparams, results_base_dir="results", total_time_seconds=None):
     result_dir = f"{results_base_dir}/{hyperparams['experiment_name']}"
     os.makedirs(result_dir, exist_ok=True)
 
@@ -236,13 +237,17 @@ def comprehensive_evaluation(trainer, tokenized_datasets, hyperparams, results_b
     
     # Save comprehensive results
     results = {
+        'execution_time': {
+            'total_seconds': round(total_time_seconds, 2) if total_time_seconds is not None else None,
+            'formatted_time': f"{int(total_time_seconds // 3600):02d}:{int((total_time_seconds % 3600) // 60):02d}:{int(total_time_seconds % 60):02d}" if total_time_seconds is not None else None
+        },
         'overall_metrics': metrics,
         'per_class_metrics': class_report,
         'detailed_class_analysis': detailed_analysis,
         'training_progress': training_progress,
         'confusion_matrix': cm.tolist(),
         'true_distribution': true_dist.to_dict(),
-        'pred_distribution': pred_dist.to_dict()
+        'pred_distribution': pred_dist.to_dict(),
     }
     with open(f"{result_dir}/evaluation.json", 'w') as f:
         json.dump(results, f, indent=2)
@@ -266,6 +271,7 @@ def build_contextual_dataset(dataset):
 
 
 def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="checkpoints"):
+    start_time = time.time()
     load_dotenv(find_dotenv())
     device = detect_device()
 
@@ -384,7 +390,9 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
             mlflow.log_artifacts(best_ckpt, artifact_path="best_checkpoint")
 
         # Evaluate and log
-        comprehensive_evaluation(advanced_trainer, tokenized_datasets, params, results_base_dir=results_base_dir)
+        end_time = time.time()
+        total_time_seconds = end_time - start_time
+        comprehensive_evaluation(advanced_trainer, tokenized_datasets, params, results_base_dir=results_base_dir, total_time_seconds=total_time_seconds)
         result_dir = f"{results_base_dir}/{params['experiment_name']}"
         if os.path.isdir(result_dir):
             mlflow.log_artifacts(result_dir, artifact_path="results")
