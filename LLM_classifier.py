@@ -130,7 +130,7 @@ def build_system_prompt() -> str:
     )
 
 
-def build_user_prompt(batch_items: list[dict], fewshot_examples: list[dict]) -> str:
+def build_user_prompt(batch_items: list[dict] | dict, fewshot_examples: list[dict]) -> str:
     sections: list[str] = []
     if fewshot_examples:
         sections.append("Few-shot labeled examples (for guidance, format: premise, hypothesis, label, reasoning):")
@@ -144,28 +144,44 @@ def build_user_prompt(batch_items: list[dict], fewshot_examples: list[dict]) -> 
             for ex in fewshot_examples
         ], ensure_ascii=False, indent=2))
 
-    sections.append("Classify the following batch in the same order:")
+    if isinstance(batch_items, dict):
+        sections.append("Classify the following example:")
+    elif isinstance(batch_items, list):
+        sections.append("Classify the following batch in the same order:")
+    else:
+        raise ValueError(f"Invalid batch items type: {type(batch_items)}")
     sections.append(json.dumps(batch_items, ensure_ascii=False, indent=2))
 
-    sections.append(
-        "Output instructions:\n"
-        "- Respond ONLY with a JSON object conforming to the provided schema.\n"
-        "- Keep the order exactly the same as provided (one classification per input).\n"
-        "- Provide a brief reasoning string for each item."
-    )
+    if isinstance(batch_items, dict):
+        sections.append(
+            "Output instructions:\n"
+            "- Respond ONLY with a JSON object conforming to the provided schema.\n"
+        )
+    elif isinstance(batch_items, list):
+        sections.append(
+            "Output instructions:\n"
+            "- Respond ONLY with a JSON object conforming to the provided schema.\n"
+            "- Keep the order exactly the same as provided (one classification and reasoning per input).\n"
+        )
+    else:
+        raise ValueError(f"Invalid batch items type: {type(batch_items)}")
+
     return "\n\n".join(sections)
 
 
-def call_openai_classify_batch(
-    client: OpenAI, 
-    model: str, 
-    batch_items: list[dict], 
+def call_openai_classification(
+    client: OpenAI,
+    model: str,
+    items: list[dict] | dict,
     fewshot_examples: list[dict]
-) -> BatchMNLIClassification:
+) -> MNLIClassification | BatchMNLIClassification:
     messages = [
         {"role": "system", "content": build_system_prompt()},
-        {"role": "user", "content": build_user_prompt(batch_items, fewshot_examples)},
+        {"role": "user", "content": build_user_prompt(items, fewshot_examples)},
     ]
+    is_single = isinstance(items, dict)
+    schema = MNLIClassification.model_json_schema() if is_single else BatchMNLIClassification.model_json_schema()
+    schema_name = "single_dialogue_act_classification" if is_single else "batch_dialogue_act_classification"
     completion = client.chat.completions.create(
         model=model,
         messages=messages,
@@ -173,27 +189,39 @@ def call_openai_classify_batch(
         response_format={
             "type": "json_schema",
             "json_schema": {
-                "name": "batch_dialogue_act_classification",
-                "schema": BatchMNLIClassification.model_json_schema()
+                "name": schema_name,
+                "schema": schema
             },
         },
     )
 
     content = completion.choices[0].message.content
     try:
-        parsed = BatchMNLIClassification.model_validate_json(content)
+        if isinstance(items, dict):
+            parsed = MNLIClassification.model_validate_json(content)
+        elif isinstance(items, list):
+            parsed = BatchMNLIClassification.model_validate_json(content)
+        else:
+            raise ValueError(f"Invalid items type: {type(items)}")
     except Exception:
         obj = json.loads(content)
-        parsed = BatchMNLIClassification(**obj)
+        if isinstance(items, dict):
+            parsed = MNLIClassification(**obj)
+        elif isinstance(items, list):
+            parsed = BatchMNLIClassification(**obj)
+        else:
+            raise ValueError(f"Invalid items type: {type(items)}")
     return parsed
 
 
 def run_classification(
-    round: int = 1, 
+    name: str = "baseline", 
     model: str = "gpt-4o-mini", 
-    batch_size: int = 20, 
+    classification_mode: Literal["batch", "single"] = "batch",
+    max_examples: int | None = None,
     max_batches: int | None = None,
-    present_results: Literal["file", "console", "none"] = "console"
+    batch_size: int = 20, 
+    present_results: Literal["file", "console", "none"] = "console",
 ):
     load_dotenv(find_dotenv())
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -204,17 +232,31 @@ def run_classification(
         for ex in test_ds
     ]
 
-    total = len(test_inputs)
-    indices = list(range(0, total, batch_size))
-    if max_batches is not None:
-        indices = indices[:max_batches]
-
     results: list[MNLIClassification] = []
-    for start in tqdm(indices, desc="Classifying batches"):
-        end = min(start + batch_size, total)
-        batch_items = test_inputs[start:end]
-        parsed = call_openai_classify_batch(client, model, batch_items, get_fewshot_examples())
-        results.extend(parsed.classifications)
+    fewshot_examples = get_fewshot_examples()
+
+    if classification_mode == "batch":
+        total = len(test_inputs)
+        indices = list(range(0, total, batch_size))
+        if max_batches is not None:
+            indices = indices[:max_batches]
+
+        for start in tqdm(indices, desc="Classifying batches"):
+            end = min(start + batch_size, total)
+            batch_items = test_inputs[start:end]
+            parsed = call_openai_classification(client, model, batch_items, fewshot_examples)
+            if not isinstance(parsed, BatchMNLIClassification):
+                raise TypeError("Expected BatchMNLIClassification in batch mode")
+            results.extend(parsed.classifications)
+    else:
+        total = len(test_inputs)
+        end_index = total if max_examples is None else min(max_examples, total)
+        for i in tqdm(range(0, end_index), desc="Classifying singles"):
+            item = test_inputs[i]
+            parsed_single = call_openai_classification(client, model, item, fewshot_examples)
+            if not isinstance(parsed_single, MNLIClassification):
+                raise TypeError("Expected MNLIClassification in single mode")
+            results.append(parsed_single)
 
     y_pred: list[int] = []
     for result in results:
@@ -234,7 +276,7 @@ def run_classification(
         print(comparison_str)
     elif present_results == "file":
         os.makedirs("results", exist_ok=True)
-        with open(f"results/{model}_{round}_{datetime.now().strftime('%m-%d_%H-%M')}.txt", "w") as f:
+        with open(f"results/{model}_{name}_{datetime.now().strftime('%m-%d_%H-%M')}.txt", "w") as f:
             f.write(f"{metrics_str}\n\n{classification_report_str}\n\n{comparison_str}")
     else:
         pass
@@ -242,10 +284,17 @@ def run_classification(
 
 if __name__ == "__main__":
     run_classification(
-        round=1, 
+        name="baseline_single", 
         model="gpt-4o-mini", 
-        batch_size=1, 
-        max_batches=1000, 
-        present_results="file"
+        present_results="file",
+        classification_mode="single",
+        max_examples=100,
     )
-    
+    run_classification(
+        name="baseline_batch", 
+        model="gpt-4o-mini", 
+        present_results="file",
+        classification_mode="batch",
+        batch_size=10,
+        max_batches=10,
+    )
