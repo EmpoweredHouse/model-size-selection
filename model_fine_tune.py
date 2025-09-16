@@ -360,11 +360,12 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
         num_train_epochs=params["no_epochs"],
         per_device_train_batch_size=params["batch_size"],
         per_device_eval_batch_size=params["batch_size"],
-        gradient_accumulation_steps=params["gradient_accumulation_steps"],
+        gradient_accumulation_steps=params["gradient_accumulation_steps"] if params["gradient_accumulation_steps"] > 1 else None,
         warmup_steps=int(params["warmup_steps"] * total_update_steps),
         weight_decay=params["weight_decay"],
         fp16=True if device == "cuda" and not torch.cuda.is_bf16_supported() else False,
         bf16=True if device == "cuda" and torch.cuda.is_bf16_supported() else False,
+        gradient_checkpointing=params["gradient_checkpointing"],
         report_to=["mlflow"],
         dataloader_num_workers=0,    # Important for MPS compatibility
         remove_unused_columns=False, # Required for custom trainer
@@ -417,6 +418,7 @@ if __name__ == "__main__":
         "no_epochs": 4,
         "batch_size": 16,
         "gradient_accumulation_steps": 16,
+        "gradient_checkpointing": False,
         "learning_rate": 0.0002,
         "warmup_steps": 0.03,
         "weight_decay": 0.01,
@@ -438,8 +440,8 @@ if __name__ == "__main__":
         "early_stopping_patience": 5,
         "early_stopping_threshold": 0.001,
 
-        "experiment_name": "ex04_gemma7b_lora_baseline",
-        "experiment_description": "Gemma 7B base + LoRA.",
+        "experiment_name": "ex04_gemma2b_lora_baseline",
+        "experiment_description": "Gemma 2B base + LoRA.",
         "logging_experiment_name": "/Shared/SLMs",
     }
     fine_tune_model(params)
