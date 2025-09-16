@@ -88,7 +88,7 @@ def get_fewshot_examples() -> list[dict]:
             "premise": "Yeah, well, you're a student, right?",
             "hypothesis": "Well, you're a mechanics student, right?",
             "label": "neutral",
-            "reasoning": "The hypothesis specializes the field of study; the premise doesn’t confirm or deny that specialization."
+            "reasoning": "The hypothesis specializes the field of study; the premise doesn't confirm or deny that specialization."
         },
         {
             "premise": "Back on the road to Jaisalmer, one last splash of color delights the senses—fields are dotted with mounds of red hot chili peppers.",
@@ -101,7 +101,7 @@ def get_fewshot_examples() -> list[dict]:
             "premise": "Fun for adults and children.",
             "hypothesis": "Fun for only children.",
             "label": "contradiction",
-            "reasoning": "‘Only children’ directly contradicts ‘adults and children.’"
+            "reasoning": "'Only children' directly contradicts 'adults and children'."
         },
         {
             "premise": "Almost every hill has a Moorish fort; and two more, still in good repair—the Atalaya and Galeras castles—protect the sea-front arsenal.",
@@ -118,17 +118,30 @@ def get_fewshot_examples() -> list[dict]:
     ]
 
 
-def build_system_prompt() -> str:
-    return (
-        "You are an expert natural language inference (NLI) classifier. "
-        "For each (premise, hypothesis) pair, choose exactly one label:\n"
-        "- entailment: The hypothesis must be true given the premise.\n"
-        "- neutral: The hypothesis may be true or false; the premise is insufficient.\n"
-        "- contradiction: The hypothesis cannot be true given the premise.\n"
-        "Base your decision solely on the premise; do not rely on external knowledge. "
-        "Return strictly valid JSON matching the required schema."
-    )
-
+def build_system_prompt(items: list[dict] | dict) -> str:
+    if isinstance(items, dict):
+        return (
+            "You are an expert natural language inference (NLI) classifier. "
+            "For the given (premise, hypothesis) pair, choose exactly one label:\n"
+            "- entailment: The hypothesis must be true given the premise.\n"
+            "- neutral: The hypothesis may be true or false; the premise is insufficient.\n"
+            "- contradiction: The hypothesis cannot be true given the premise.\n"
+            "Base your decision solely on the premise; do not rely on external knowledge. "
+            "Return strictly valid JSON matching the required schema."
+        )
+    elif isinstance(items, list):
+        return (
+            "You are an expert natural language inference (NLI) classifier. "
+            "For each (premise, hypothesis) pair, choose exactly one label:\n"
+            "- entailment: The hypothesis must be true given the premise.\n"
+            "- neutral: The hypothesis may be true or false; the premise is insufficient.\n"
+            "- contradiction: The hypothesis cannot be true given the premise.\n"
+            "Base your decision solely on the premise; do not rely on external knowledge. "
+            "Return strictly valid JSON matching the required schema."
+        )
+    else:
+        raise ValueError(f"Invalid items type: {type(items)}")
+        
 
 def build_user_prompt(batch_items: list[dict] | dict, fewshot_examples: list[dict]) -> str:
     sections: list[str] = []
@@ -169,6 +182,32 @@ def build_user_prompt(batch_items: list[dict] | dict, fewshot_examples: list[dic
     return "\n\n".join(sections)
 
 
+def _build_minimal_schema(is_single: bool) -> dict:
+    single_schema = {
+        "type": "object",
+        "properties": {
+            "label": {"type": "string", "enum": ["entailment", "neutral", "contradiction"]},
+            "reasoning": {"type": "string"},
+        },
+        "required": ["label", "reasoning"],
+        "additionalProperties": False,
+    }
+    if is_single:
+        return single_schema
+    return {
+        "type": "object",
+        "properties": {
+            "classifications": {
+                "type": "array",
+                "items": single_schema,
+                "minItems": 1,
+            }
+        },
+        "required": ["classifications"],
+        "additionalProperties": False,
+    }
+
+
 def call_openai_classification(
     client: OpenAI,
     model: str,
@@ -176,12 +215,12 @@ def call_openai_classification(
     fewshot_examples: list[dict]
 ) -> MNLIClassification | BatchMNLIClassification:
     messages = [
-        {"role": "system", "content": build_system_prompt()},
+        {"role": "system", "content": build_system_prompt(items)},
         {"role": "user", "content": build_user_prompt(items, fewshot_examples)},
     ]
+    print(messages)
     is_single = isinstance(items, dict)
-    schema = MNLIClassification.model_json_schema() if is_single else BatchMNLIClassification.model_json_schema()
-    schema_name = "single_dialogue_act_classification" if is_single else "batch_dialogue_act_classification"
+    minimal_schema = _build_minimal_schema(is_single)
     completion = client.chat.completions.create(
         model=model,
         messages=messages,
@@ -189,29 +228,20 @@ def call_openai_classification(
         response_format={
             "type": "json_schema",
             "json_schema": {
-                "name": schema_name,
-                "schema": schema
+                "name": "mnli_single" if is_single else "mnli_batch",
+                "schema": minimal_schema,
+                "strict": True,
             },
         },
     )
 
-    content = completion.choices[0].message.content
-    try:
-        if isinstance(items, dict):
-            parsed = MNLIClassification.model_validate_json(content)
-        elif isinstance(items, list):
-            parsed = BatchMNLIClassification.model_validate_json(content)
-        else:
-            raise ValueError(f"Invalid items type: {type(items)}")
-    except Exception:
-        obj = json.loads(content)
-        if isinstance(items, dict):
-            parsed = MNLIClassification(**obj)
-        elif isinstance(items, list):
-            parsed = BatchMNLIClassification(**obj)
-        else:
-            raise ValueError(f"Invalid items type: {type(items)}")
-    return parsed
+    message = completion.choices[0].message
+    parsed_obj = getattr(message, "parsed", None)
+    if parsed_obj is None:
+        content = getattr(message, "content", None)
+        parsed_obj = json.loads(content)
+
+    return MNLIClassification(**parsed_obj) if is_single else BatchMNLIClassification(**parsed_obj)
 
 
 def run_classification(
@@ -284,14 +314,14 @@ def run_classification(
 
 if __name__ == "__main__":
     run_classification(
-        name="baseline_single", 
-        model="gpt-4o-mini", 
+        name="test", 
+        model="gpt-4o", 
         present_results="file",
         classification_mode="single",
         max_examples=100,
     )
     run_classification(
-        name="baseline_batch", 
+        name="test", 
         model="gpt-4o-mini", 
         present_results="file",
         classification_mode="batch",
