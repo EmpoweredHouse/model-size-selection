@@ -360,7 +360,7 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
         num_train_epochs=params["no_epochs"],
         per_device_train_batch_size=params["batch_size"],
         per_device_eval_batch_size=params["batch_size"],
-        gradient_accumulation_steps=params["gradient_accumulation_steps"] if params["gradient_accumulation_steps"] > 1 else None,
+        gradient_accumulation_steps=params["gradient_accumulation_steps"],
         warmup_steps=int(params["warmup_steps"] * total_update_steps),
         weight_decay=params["weight_decay"],
         fp16=True if device == "cuda" and not torch.cuda.is_bf16_supported() else False,
