@@ -412,37 +412,37 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
 
 
 if __name__ == "__main__":
-    params = {
-        "model_name": "google/gemma-2b",
+    {
+        "model_name": "distilbert-base-uncased",
 
-        "no_epochs": 4,
-        "batch_size": 16,
-        "gradient_accumulation_steps": 16,
+        "no_epochs": 6,                                 # CHANGED: a bit longer since we're training few adapter params
+        "batch_size": 32,
+        "gradient_accumulation_steps": 1,
         "gradient_checkpointing": False,
-        "learning_rate": 0.0002,
-        "warmup_steps": 0.03,
+        "learning_rate": 0.0002,                        # CHANGED: higher LR fits LoRA adapters well
+        "warmup_steps": 0.08,                           # CHANGED: longer warmup to smooth higher LR
         "weight_decay": 0.01,
 
-        "enable_lora": True,
-        "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
-        "lora_dropout": 0.05,
-        "lora_r": 16,
-        "lora_alpha": 32,
+        "enable_lora": True,                            # CHANGED: enable LoRA for comparison
+        "target_modules": ["q_lin", "v_lin", "k_lin", "out_lin"],
+        "lora_dropout": 0.1,
+        "lora_r": 32,                                   # CHANGED: start with moderate capacity
+        "lora_alpha": 64,                               # CHANGED: ≈2×r (common good default)
 
         "loss_type": "ce",
         "loss_reduction": "mean",
         "focal_gamma": 2,
-        "max_weight": 1.0,
-        "min_weight": 1.0,
+        "max_weight": 1,
+        "min_weight": 1,
 
         "max_length": 128,
 
         "early_stopping_patience": 5,
         "early_stopping_threshold": 0.001,
 
-        "experiment_name": "ex04_gemma2b_lora_baseline",
-        "experiment_description": "Gemma 2B base + LoRA.",
-        "logging_experiment_name": "/Shared/SLMs",
+        "experiment_name": "ex09_distilbert_lora_r32_lr2e-4",  # CHANGED
+        "experiment_description": "DistilBERT LoRA (q/k/v/out): r=32, α=64, LR=2e-4, warmup=8%.",  # CHANGED
+        "logging_experiment_name": "/Shared/SLMs"
     }
     fine_tune_model(params)
     print("Done")
