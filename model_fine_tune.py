@@ -415,19 +415,19 @@ if __name__ == "__main__":
     {
         "model_name": "distilbert-base-uncased",
 
-        "no_epochs": 6,                                 # CHANGED: a bit longer since we're training few adapter params
+        "no_epochs": 5,
         "batch_size": 32,
         "gradient_accumulation_steps": 1,
         "gradient_checkpointing": False,
-        "learning_rate": 0.0002,                        # CHANGED: higher LR fits LoRA adapters well
-        "warmup_steps": 0.08,                           # CHANGED: longer warmup to smooth higher LR
-        "weight_decay": 0.01,
+        "learning_rate": 0.000015,                       # CHANGED: −25% LR to curb mild overfit/volatility late training"
+        "warmup_steps": 0.08,                            # CHANGED: ↑ warmup to stabilize early steps"
+        "weight_decay": 0.02,                            # CHANGED: a touch more regularization vs. prior 0.01"
 
-        "enable_lora": True,                            # CHANGED: enable LoRA for comparison
+        "enable_lora": False,
         "target_modules": ["q_lin", "v_lin", "k_lin", "out_lin"],
         "lora_dropout": 0.1,
-        "lora_r": 32,                                   # CHANGED: start with moderate capacity
-        "lora_alpha": 64,                               # CHANGED: ≈2×r (common good default)
+        "lora_r": 64,
+        "lora_alpha": 128,
 
         "loss_type": "ce",
         "loss_reduction": "mean",
@@ -440,8 +440,8 @@ if __name__ == "__main__":
         "early_stopping_patience": 5,
         "early_stopping_threshold": 0.001,
 
-        "experiment_name": "ex09_distilbert_lora_r32_lr2e-4",  # CHANGED
-        "experiment_description": "DistilBERT LoRA (q/k/v/out): r=32, α=64, LR=2e-4, warmup=8%.",  # CHANGED
+        "experiment_name": "ex03_fullft_ce_lr1.5e-5_wd0.02_wu8",  # CHANGED
+        "experiment_description": "Full FT: lower LR (1.5e-5), warmup 8%, wd=0.02 to improve generalization.",  # CHANGED
         "logging_experiment_name": "/Shared/SLMs"
     }
     fine_tune_model(params)
