@@ -412,7 +412,7 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
 
 
 if __name__ == "__main__":
-    {
+    params = {
         "model_name": "distilbert-base-uncased",
 
         "no_epochs": 5,
