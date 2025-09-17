@@ -440,7 +440,7 @@ if __name__ == "__main__":
         "early_stopping_patience": 5,
         "early_stopping_threshold": 0.001,
 
-        "experiment_name": "ex03_fullft_ce_lr1.5e-5_wd0.02_wu8",  # CHANGED
+        "experiment_name": "ex09_distilbert_full_ce_lr1.5e-5_wd0.02_wu8",  # CHANGED
         "experiment_description": "Full FT: lower LR (1.5e-5), warmup 8%, wd=0.02 to improve generalization.",  # CHANGED
         "logging_experiment_name": "/Shared/SLMs"
     }
