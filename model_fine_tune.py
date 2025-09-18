@@ -423,12 +423,12 @@ if __name__ == "__main__":
         "batch_size": 16,
         "gradient_accumulation_steps": 16,
         "gradient_checkpointing": False,
-        "learning_rate": 0.0002,
+        "learning_rate": 0.00001,
         "warmup_steps": 0.03,
         "weight_decay": 0.01,
 
-        "enable_lora": True,
-        "target_modules": ["query_proj", "key_proj", "value_proj", "o_proj"],
+        "enable_lora": False,                         
+        "target_modules": ["query_proj", "key_proj", "value_proj", "o_proj" ]
         "lora_dropout": 0.05,
         "lora_r": 32,
         "lora_alpha": 64,
@@ -444,8 +444,8 @@ if __name__ == "__main__":
         "early_stopping_patience": 5,
         "early_stopping_threshold": 0.001,
 
-        "experiment_name": "ex13_deberta_v2_xl_gemma2b_parity",
-        "experiment_description": "Parity run vs Gemma2B LoRA: same hyperparams; only model & target_modules adjusted.",
+        "experiment_name": "ex14_deberta_v2_xl_fullft_baseline",
+        "experiment_description": "Parity to Gemma LoRA run but full FT on DeBERTa-v2-xlarge; only model+LR+enable_lora changed.",
         "logging_experiment_name": "/Shared/SLMs"
     }
 
