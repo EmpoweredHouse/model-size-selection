@@ -428,7 +428,7 @@ if __name__ == "__main__":
         "weight_decay": 0.01,
 
         "enable_lora": False,                         
-        "target_modules": ["query_proj", "key_proj", "value_proj", "o_proj" ]
+        "target_modules": ["query_proj", "key_proj", "value_proj", "o_proj"],
         "lora_dropout": 0.05,
         "lora_r": 32,
         "lora_alpha": 64,
