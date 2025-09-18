@@ -413,19 +413,19 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
 
 if __name__ == "__main__":
     params = {
-        "model_name": "roberta-base",
+        "model_name": "microsoft/deberta-v2-xlarge",
 
-        "no_epochs": 6,
-        "batch_size": 32,
-        "gradient_accumulation_steps": 1,
+        "no_epochs": 4,
+        "batch_size": 16,
+        "gradient_accumulation_steps": 16,
         "gradient_checkpointing": False,
-        "learning_rate": 0.00002,
-        "warmup_steps": 0.06,
+        "learning_rate": 0.0002,
+        "warmup_steps": 0.03,
         "weight_decay": 0.01,
 
-        "enable_lora": False,
-        "target_modules": ["query", "key", "value", "dense"],
-        "lora_dropout": 0.1,
+        "enable_lora": True,
+        "target_modules": ["query_proj", "key_proj", "value_proj", "o_proj"],
+        "lora_dropout": 0.05,
         "lora_r": 32,
         "lora_alpha": 64,
 
@@ -440,12 +440,10 @@ if __name__ == "__main__":
         "early_stopping_patience": 5,
         "early_stopping_threshold": 0.001,
 
-        "experiment_name": "ex12_roberta_full_baseline",
-        "experiment_description": "RoBERTa-base full baseline.",
+        "experiment_name": "ex12_deberta_v2_xl_gemma2b_parity",
+        "experiment_description": "Parity run vs Gemma2B LoRA: same hyperparams; only model & target_modules adjusted.",
         "logging_experiment_name": "/Shared/SLMs"
     }
-
-
 
     fine_tune_model(params)
     print("Done")
