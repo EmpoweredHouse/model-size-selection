@@ -413,21 +413,21 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
 
 if __name__ == "__main__":
     params = {
-        "model_name": "distilbert-base-uncased",
+        "model_name": "roberta-base",
 
-        "no_epochs": 6,                                 # CHANGED: a bit longer since we're training few adapter params
+        "no_epochs": 6,
         "batch_size": 32,
         "gradient_accumulation_steps": 1,
         "gradient_checkpointing": False,
-        "learning_rate": 0.0002,                        # CHANGED: higher LR fits LoRA adapters well
-        "warmup_steps": 0.08,                            # CHANGED: longer warmup to smooth higher LR
+        "learning_rate": 0.0001,
+        "warmup_steps": 0.08,
         "weight_decay": 0.01,
 
-        "enable_lora": True,                             # CHANGED: enable LoRA for comparison
-        "target_modules": ["q_lin", "v_lin", "k_lin", "out_lin"],
+        "enable_lora": True,
+        "target_modules": ["query", "key", "value", "dense"],
         "lora_dropout": 0.1,
-        "lora_r": 32,                                    # CHANGED: start with moderate capacity
-        "lora_alpha": 64,                                # CHANGED: ≈2×r (common good default)
+        "lora_r": 32,
+        "lora_alpha": 64,
 
         "loss_type": "ce",
         "loss_reduction": "mean",
@@ -440,10 +440,11 @@ if __name__ == "__main__":
         "early_stopping_patience": 5,
         "early_stopping_threshold": 0.001,
 
-        "experiment_name": "ex10_distilbert_lora_r32_lr2e-4",  # CHANGED
-        "experiment_description": "DistilBERT LoRA (q/k/v/out): r=32, α=64, LR=2e-4, warmup=8%.",  # CHANGED
+        "experiment_name": "ex11_roberta_lora_baseline",
+        "experiment_description": "RoBERTa-base LoRA.",
         "logging_experiment_name": "/Shared/SLMs"
     }
+
 
     fine_tune_model(params)
     print("Done")
