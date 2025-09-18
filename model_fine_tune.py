@@ -423,7 +423,7 @@ if __name__ == "__main__":
         "batch_size": 8,
         "gradient_accumulation_steps": 32,
         "gradient_checkpointing": False,
-        "learning_rate": 0.00008
+        "learning_rate": 0.00008,
         "warmup_steps": 0.1,
         "weight_decay": 0.03,
         
