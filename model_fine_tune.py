@@ -419,11 +419,11 @@ if __name__ == "__main__":
         "batch_size": 32,
         "gradient_accumulation_steps": 1,
         "gradient_checkpointing": False,
-        "learning_rate": 0.0001,
-        "warmup_steps": 0.08,
+        "learning_rate": 0.00002,
+        "warmup_steps": 0.06,
         "weight_decay": 0.01,
 
-        "enable_lora": True,
+        "enable_lora": False,
         "target_modules": ["query", "key", "value", "dense"],
         "lora_dropout": 0.1,
         "lora_r": 32,
@@ -440,10 +440,11 @@ if __name__ == "__main__":
         "early_stopping_patience": 5,
         "early_stopping_threshold": 0.001,
 
-        "experiment_name": "ex11_roberta_lora_baseline",
-        "experiment_description": "RoBERTa-base LoRA.",
+        "experiment_name": "ex12_roberta_full_baseline",
+        "experiment_description": "RoBERTa-base full baseline.",
         "logging_experiment_name": "/Shared/SLMs"
     }
+
 
 
     fine_tune_model(params)
