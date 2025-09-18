@@ -306,7 +306,11 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
     )
 
     # Setup tokenizer and data collator
-    tokenizer = AutoTokenizer.from_pretrained(params["model_name"])
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(params["model_name"], use_fast=True)
+    except Exception as e:
+        warnings.warn(f"Fast tokenizer load failed ({e}). Falling back to slow tokenizer. Consider installing 'sentencepiece' (and optionally 'tiktoken').")
+        tokenizer = AutoTokenizer.from_pretrained(params["model_name"], use_fast=False)
     if tokenizer.pad_token is None and hasattr(tokenizer, "eos_token") and tokenizer.eos_token is not None:
         tokenizer.pad_token = tokenizer.eos_token
     special_tokens_dict = {"additional_special_tokens": ["[PREMISE]", "[HYPOTHESIS]"]}
