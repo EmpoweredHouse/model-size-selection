@@ -416,39 +416,7 @@ def fine_tune_model(params, results_base_dir="results", checkpoints_base_dir="ch
 
 
 if __name__ == "__main__":
-    params = {
-        "model_name": "microsoft/deberta-v2-xlarge",
-
-        "no_epochs": 6,
-        "batch_size": 8,
-        "gradient_accumulation_steps": 32,
-        "gradient_checkpointing": False,
-        "learning_rate": 0.00008,
-        "warmup_steps": 0.1,
-        "weight_decay": 0.03,
-        
-        "enable_lora": True,
-        "target_modules": ["query_proj", "key_proj", "value_proj", "o_proj"],
-        "lora_dropout": 0.05,
-        "lora_r": 16,
-        "lora_alpha": 32,
-
-        "loss_type": "ce",
-        "loss_reduction": "mean",
-        "focal_gamma": 2,
-        "max_weight": 1,
-        "min_weight": 1,
-
-        "max_length": 128,
-
-        "early_stopping_patience": 4,
-        "early_stopping_threshold": 0.001,
-
-        "experiment_name": "ex15_deberta_v2_xl_lora_stabilized_lr8e-5_wu10_r16",
-        "experiment_description": "DeBERTa-v2-xlarge LoRA stabilized: LR=8e-5. Similar problem to Gemma7B, similar solution.",
-        "logging_experiment_name": "/Shared/SLMs"
-    }
-
+    params = {'model_name': 'microsoft/deberta-v2-xlarge', 'no_epochs': 4, 'batch_size': 16, 'gradient_accumulation_steps': 16, 'gradient_checkpointing': False, 'learning_rate': 1e-05, 'warmup_steps': 0.03, 'weight_decay': 0.01, 'enable_lora': False, 'target_modules': ['query_proj', 'key_proj', 'value_proj', 'o_proj'], 'lora_dropout': 0.05, 'lora_r': 32, 'lora_alpha': 64, 'loss_type': 'ce', 'loss_reduction': 'mean', 'focal_gamma': 2, 'max_weight': 1, 'min_weight': 1, 'max_length': 128, 'early_stopping_patience': 5, 'early_stopping_threshold': 0.001, 'experiment_name': 'ex14_deberta_v2_xl_fullft_baseline', 'experiment_description': 'Parity to Gemma LoRA run but full FT on DeBERTa-v2-xlarge; only model+LR+enable_lora changed.', 'logging_experiment_name': '/Shared/SLMs'}
 
     fine_tune_model(params)
     print("Done")
