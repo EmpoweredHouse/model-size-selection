@@ -444,7 +444,7 @@ if __name__ == "__main__":
         "early_stopping_patience": 5,
         "early_stopping_threshold": 0.001,
 
-        "experiment_name": "ex12_deberta_v2_xl_gemma2b_parity",
+        "experiment_name": "ex13_deberta_v2_xl_gemma2b_parity",
         "experiment_description": "Parity run vs Gemma2B LoRA: same hyperparams; only model & target_modules adjusted.",
         "logging_experiment_name": "/Shared/SLMs"
     }
