@@ -45,19 +45,9 @@ def is_lora_checkpoint(checkpoint_path: str) -> bool:
     return os.path.exists(os.path.join(checkpoint_path, "adapter_config.json"))
 
 
-def try_load_params(checkpoint_path: str, params_json: Optional[str]) -> dict:
-    if params_json and os.path.isfile(params_json):
-        with open(params_json, "r") as f:
-            return json.load(f)
 
-    # Infer experiment_name from checkpoints/<experiment_name>/checkpoint-xxx
-    experiment_name = os.path.basename(os.path.dirname(os.path.abspath(checkpoint_path)))
-    candidate = os.path.join(os.path.dirname(__file__), "results", experiment_name, "hyperparams.json")
-    if os.path.isfile(candidate):
-        with open(candidate, "r") as f:
-            return json.load(f)
-            
-    raise ValueError(f"No hyperparams.json found in results/{experiment_name}")
+def compose_text(premise: str, hypothesis: str) -> str:
+    return f"[PREMISE] {premise} [HYPOTHESIS] {hypothesis}"
 
 
 def ensure_tokenizer_special_tokens(tokenizer: AutoTokenizer) -> None:
@@ -71,19 +61,33 @@ def ensure_tokenizer_special_tokens(tokenizer: AutoTokenizer) -> None:
         pass
 
 
-def load_tokenizer(checkpoint_path: str, model_name: str) -> AutoTokenizer:
+def load_tokenizer(checkpoint_path: str, model_name: Optional[str]) -> AutoTokenizer:
     # Prefer tokenizer saved in checkpoint (if available)
     try:
         tokenizer = AutoTokenizer.from_pretrained(checkpoint_path)
     except Exception:
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        base_model_name = model_name
+        # If model_name not provided or failed, try reading LoRA adapter config for base model
+        if (not base_model_name) or base_model_name is None:
+            adapter_cfg_path = os.path.join(checkpoint_path, "adapter_config.json")
+            if os.path.exists(adapter_cfg_path):
+                try:
+                    with open(adapter_cfg_path, "r") as f:
+                        adapter_cfg = json.load(f)
+                    base_model = adapter_cfg.get("base_model_name_or_path")
+                    if base_model:
+                        base_model_name = base_model
+                except Exception:
+                    pass
+        if not base_model_name:
+            raise ValueError("Could not determine tokenizer source. Provide --params_json with 'model_name' or ensure checkpoint contains a tokenizer or LoRA adapter_config.json with base model.")
+        tokenizer = AutoTokenizer.from_pretrained(base_model_name)
     ensure_tokenizer_special_tokens(tokenizer)
     return tokenizer
 
 
 def load_model(
     checkpoint_path: str,
-    params: dict,
     tokenizer: AutoTokenizer,
     device: str,
     merge_lora: bool = False,
@@ -100,21 +104,21 @@ def load_model(
 
     if is_lora_checkpoint(checkpoint_path):
         # If model name is missing, try to read from adapter_config.json
-        if "model_name" not in params:
-            adapter_cfg_path = os.path.join(checkpoint_path, "adapter_config.json")
-            if os.path.exists(adapter_cfg_path):
-                try:
-                    with open(adapter_cfg_path, "r") as f:
-                        adapter_cfg = json.load(f)
-                    base_model = adapter_cfg.get("base_model_name_or_path")
-                    if base_model:
-                        params["model_name"] = base_model
-                except Exception:
-                    pass
+        base_model_name = None
+        adapter_cfg_path = os.path.join(checkpoint_path, "adapter_config.json")
+        if os.path.exists(adapter_cfg_path):
+            try:
+                with open(adapter_cfg_path, "r") as f:
+                    adapter_cfg = json.load(f)
+                base_model_name = adapter_cfg.get("base_model_name_or_path")
+            except Exception:
+                base_model_name = None
+        if not base_model_name:
+            raise ValueError("LoRA adapter found but base_model_name_or_path missing in adapter_config.json")
 
         base_model = AutoModelForSequenceClassification.from_pretrained(
-            params["model_name"],
-            num_labels=params.get("num_labels", 3),
+            base_model_name,
+            num_labels=3,
             problem_type="single_label_classification",
             **load_kwargs,
         )
@@ -136,6 +140,11 @@ def load_model(
 
     # Full model checkpoint
     model = AutoModelForSequenceClassification.from_pretrained(checkpoint_path, **load_kwargs)
+    # Ensure embedding size matches tokenizer if special tokens were added
+    try:
+        model.resize_token_embeddings(len(tokenizer))
+    except Exception:
+        pass
     model.to(device)
     model.eval()
     return model, False
@@ -199,8 +208,9 @@ def tokenize_dataset(dataset: datasets.Dataset, tokenizer: AutoTokenizer, max_le
 def evaluate_on_mnli(
     model: torch.nn.Module,
     tokenizer: AutoTokenizer,
-    params: dict,
     device: str,
+    max_length: int,
+    batch_size: int,
     max_eval_samples: Optional[int] = None,
 ) -> dict:
     raw = load_dataset("nyu-mll/glue", "mnli")
@@ -208,7 +218,7 @@ def evaluate_on_mnli(
         "validation": raw["validation_matched"],
     })
     dataset = build_contextual_dataset(dataset)
-    tokenized = tokenize_dataset(dataset["validation"], tokenizer, params.get("max_length", 128))
+    tokenized = tokenize_dataset(dataset["validation"], tokenizer, max_length)
 
     if max_eval_samples is not None and max_eval_samples > 0:
         tokenized = tokenized.select(range(min(max_eval_samples, len(tokenized))))
@@ -225,7 +235,7 @@ def evaluate_on_mnli(
 
     from torch.utils.data import DataLoader
 
-    loader = DataLoader(tokenized, batch_size=params.get("batch_size", 16), shuffle=False, collate_fn=_collate)
+    loader = DataLoader(tokenized, batch_size=batch_size, shuffle=False, collate_fn=_collate)
 
     all_preds = []
     all_labels = []
@@ -263,24 +273,56 @@ def predict_single(
     max_length: int,
     device: str,
 ) -> Tuple[int, list]:
-    text = f"[PREMISE] {premise} [HYPOTHESIS] {hypothesis}"
-    enc = tokenizer(text, return_tensors="pt", truncation=True, padding=False, max_length=max_length)
-    enc = {k: v.to(device) for k, v in enc.items()}
+    preds, probs = predict_batch(
+        model=model,
+        tokenizer=tokenizer,
+        pairs=[{"premise": premise, "hypothesis": hypothesis}],
+        max_length=max_length,
+        device=device,
+        batch_size=1,
+    )
+    return int(preds[0]), probs[0]
+
+
+def predict_batch(
+    model: torch.nn.Module,
+    tokenizer: AutoTokenizer,
+    pairs: list,
+    max_length: int,
+    device: str,
+    batch_size: int,
+) -> Tuple[list, list]:
+    texts = [compose_text(item["premise"], item["hypothesis"]) for item in pairs]
+    all_preds = []
+    all_probs = []
     model.eval()
     with torch.no_grad():
-        logits = model(**enc).logits
-        probs = F.softmax(logits, dim=-1).squeeze(0).cpu().tolist()
-        pred = int(torch.argmax(logits, dim=-1).item())
-    return pred, probs
+        for i in range(0, len(texts), batch_size):
+            chunk = texts[i:i + batch_size]
+            enc = tokenizer(
+                chunk,
+                return_tensors="pt",
+                truncation=True,
+                padding=True,
+                max_length=max_length,
+            )
+            enc = {k: v.to(device) for k, v in enc.items()}
+            logits = model(**enc).logits
+            probs = F.softmax(logits, dim=-1).cpu().tolist()
+            preds = torch.argmax(logits, dim=-1).cpu().tolist()
+            all_preds.extend([int(p) for p in preds])
+            all_probs.extend(probs)
+    return all_preds, all_probs
 
 
 def main():
     parser = argparse.ArgumentParser(description="Simple MNLI inference for full or LoRA checkpoints")
     parser.add_argument("--checkpoint_path", required=True, help="Path to checkpoint directory (full or LoRA)")
-    parser.add_argument("--params_json", default=None, help="Optional path to params JSON (like in training)")
-    parser.add_argument("--mode", choices=["single", "eval"], default="single", help="Inference mode")
+    parser.add_argument("--mode", choices=["single", "batch", "eval"], default="single", help="Inference mode")
     parser.add_argument("--premise", default=None, help="Premise text for single prediction")
     parser.add_argument("--hypothesis", default=None, help="Hypothesis text for single prediction")
+    parser.add_argument("--batch_json", default=None, help="Path to JSON/JSONL file for batch predictions")
+    parser.add_argument("--batch_size", type=int, default=None, help="Batch size for batch predictions")
     parser.add_argument("--max_eval_samples", type=int, default=None, help="Limit num validation samples for quick eval")
     parser.add_argument("--merge_lora", action="store_true", help="Merge LoRA into base weights for inference")
     args = parser.parse_args()
@@ -317,25 +359,10 @@ def main():
     # Start measuring model load time AFTER any artifact download
     load_start_ts = time.time()
 
-    params = try_load_params(local_ckpt_path, args.params_json)
-    # If num_labels can be inferred from config.json in checkpoint, use it
-    try:
-        cfg_path = os.path.join(local_ckpt_path, "config.json")
-        if os.path.exists(cfg_path):
-            with open(cfg_path, "r") as f:
-                cfg = json.load(f)
-            if isinstance(cfg, dict) and "num_labels" in cfg:
-                params.setdefault("num_labels", cfg["num_labels"])
-    except Exception:
-        pass
-    if "model_name" not in params:
-        raise ValueError("'model_name' must be available in params (via --params_json or results/<exp>/hyperparams.json)")
-
     # Load tokenizer and model
-    tokenizer = load_tokenizer(local_ckpt_path, params["model_name"])
+    tokenizer = load_tokenizer(local_ckpt_path, None)
     model, is_lora = load_model(
         checkpoint_path=local_ckpt_path,
-        params=params,
         tokenizer=tokenizer,
         device=device,
         merge_lora=args.merge_lora,
@@ -353,7 +380,7 @@ def main():
             tokenizer=tokenizer,
             premise=args.premise,
             hypothesis=args.hypothesis,
-            max_length=params.get("max_length", 128),
+            max_length=128,
             device=device,
         )
         inf_end_ts = time.time()
@@ -368,13 +395,76 @@ def main():
         }, indent=2))
         return
 
+    if args.mode == "batch":
+        if not args.batch_json or not os.path.isfile(args.batch_json):
+            raise ValueError("--batch_json is required for batch mode and must point to a file")
+
+        def _load_pairs(path: str) -> list:
+            with open(path, "r") as f:
+                content = f.read().strip()
+            if not content:
+                return []
+            # Try JSON array or object with items first
+            try:
+                data = json.loads(content)
+                if isinstance(data, dict) and "items" in data and isinstance(data["items"], list):
+                    return data["items"]
+                if isinstance(data, list):
+                    return data
+            except Exception:
+                pass
+            # Fallback to JSONL
+            pairs = []
+            for line in content.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                obj = json.loads(line)
+                pairs.append(obj)
+            return pairs
+
+        pairs = _load_pairs(args.batch_json)
+        if not pairs:
+            raise ValueError("No items found in --batch_json. Expected list of {premise, hypothesis}.")
+        # Validate
+        for idx, it in enumerate(pairs):
+            if not isinstance(it, dict) or "premise" not in it or "hypothesis" not in it:
+                raise ValueError(f"Item at index {idx} is invalid. Expected keys: 'premise', 'hypothesis'.")
+
+        batch_size = args.batch_size or 16
+        inf_start_ts = time.time()
+        preds, probs = predict_batch(
+            model=model,
+            tokenizer=tokenizer,
+            pairs=pairs,
+            max_length=128,
+            device=device,
+            batch_size=batch_size,
+        )
+        inf_end_ts = time.time()
+        inference_seconds = round(inf_end_ts - inf_start_ts, 4)
+        results = [
+            {"prediction": int(preds[i]), "probs": probs[i]} for i in range(len(preds))
+        ]
+        print(json.dumps({
+            "results": results,
+            "timings": {
+                "model_load_seconds": model_load_seconds,
+                "inference_seconds": inference_seconds,
+                "batch_size": batch_size,
+                "num_items": len(results)
+            }
+        }, indent=2))
+        return
+
     # Eval mode
     eval_start_ts = time.time()
     metrics = evaluate_on_mnli(
         model=model,
         tokenizer=tokenizer,
-        params=params,
         device=device,
+        max_length=128,
+        batch_size=args.batch_size or 16,
         max_eval_samples=args.max_eval_samples,
     )
     eval_end_ts = time.time()
@@ -402,4 +492,4 @@ if __name__ == "__main__":
     main()
     # python model_inference.py --checkpoint_path your_checkpoint_path_or_uri --mode single --premise 'A soccer game with multiple males playing.' --hypothesis 'Some men are playing a sport.' --merge_lora
     # python model_inference.py --checkpoint_path your_checkpoint_path_or_uri --mode eval --max_eval_samples 200 --merge_lora
-
+    
