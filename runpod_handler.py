@@ -46,12 +46,30 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     }
     """
     try:
+        print(f"🔍 HANDLER START - Received job: {job}")
+        print(f"🔍 Job type: {type(job)}")
+        
         # Initialize model if not already done
+        print("🔍 Initializing model...")
         model_ctx = initialize_model()
+        print(f"🔍 Model context loaded: model={model_ctx.model is not None}, tokenizer={model_ctx.tokenizer is not None}")
+        
+        if model_ctx.model is None or model_ctx.tokenizer is None or model_ctx.params is None:
+            error_msg = f"Model not properly initialized - model: {model_ctx.model is not None}, tokenizer: {model_ctx.tokenizer is not None}, params: {model_ctx.params is not None}"
+            print(f"❌ {error_msg}")
+            return {"error": error_msg}
         
         # Extract input data
         job_input = job.get("input", {})
+        print(f"🔍 Job input: {job_input}")
+        
+        if not job_input:
+            error_msg = "Missing 'input' field in job"
+            print(f"❌ {error_msg}")
+            return {"error": error_msg}
+            
         action = job_input.get("action", "single")
+        print(f"🔍 Processing action: {action}")
         
         # Handle different actions
         if action == "health":
@@ -141,9 +159,15 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             return {"error": f"Unknown action: {action}. Supported: single, batch, health, info"}
     
     except Exception as e:
-        return {"error": f"Handler error: {str(e)}"}
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"💥 HANDLER EXCEPTION: {str(e)}")
+        print(f"💥 FULL TRACEBACK:\n{error_details}")
+        return {"error": f"Handler error: {str(e)}", "traceback": error_details}
 
 
 if __name__ == "__main__":
     # Start the RunPod serverless worker
-    runpod.serverless.start({"handler": handler})
+    # In production, RunPod will call this automatically
+    # For local testing, we can use runpod's server mode
+    runpod.serverless.start({"handler": handler, "return_aggregate_stream": True})

@@ -21,4 +21,5 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "runpod>=1.7.0",
+    "databricks-sdk>=0.31.0",
 ]
