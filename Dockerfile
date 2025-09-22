@@ -41,6 +41,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -sf http://127.0.0.1:8000/healthz || exit 1
 
-# Always run FastAPI
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# For RunPod serverless, use the handler
+CMD ["python", "runpod_handler.py"]
 
