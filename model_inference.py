@@ -64,7 +64,11 @@ def ensure_tokenizer_special_tokens(tokenizer: AutoTokenizer) -> None:
 def load_tokenizer(checkpoint_path: str, model_name: Optional[str]) -> AutoTokenizer:
     # Prefer tokenizer saved in checkpoint (if available)
     try:
-        tokenizer = AutoTokenizer.from_pretrained(checkpoint_path)
+        # For local paths, add local_files_only=True to avoid HF validation
+        if os.path.exists(checkpoint_path) and os.path.isdir(checkpoint_path):
+            tokenizer = AutoTokenizer.from_pretrained(checkpoint_path, local_files_only=True)
+        else:
+            tokenizer = AutoTokenizer.from_pretrained(checkpoint_path)
     except Exception:
         base_model_name = model_name
         # If model_name not provided or failed, try reading LoRA adapter config for base model
