@@ -51,6 +51,33 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         
         # Initialize model if not already done
         print("🔍 Initializing model...")
+        
+        # Debug: Check filesystem and environment
+        import os
+        checkpoint_path = os.environ.get("CHECKPOINT_PATH", "NOT_SET")
+        print(f"🔍 CHECKPOINT_PATH env var: {checkpoint_path}")
+        print(f"🔍 Current working directory: {os.getcwd()}")
+        
+        # Check common RunPod paths
+        paths_to_check = [
+            "/workspace",
+            "/runpod-volume", 
+            "/app",
+            checkpoint_path if checkpoint_path != "NOT_SET" else None
+        ]
+        
+        for path in paths_to_check:
+            if path:
+                exists = os.path.exists(path)
+                is_dir = os.path.isdir(path) if exists else False
+                print(f"🔍 Path '{path}': exists={exists}, is_dir={is_dir}")
+                if exists and is_dir:
+                    try:
+                        contents = os.listdir(path)[:5]  # First 5 items
+                        print(f"🔍   Contents (first 5): {contents}")
+                    except Exception as e:
+                        print(f"🔍   Could not list contents: {e}")
+        
         model_ctx = initialize_model()
         print(f"🔍 Model context loaded: model={model_ctx.model is not None}, tokenizer={model_ctx.tokenizer is not None}")
         
