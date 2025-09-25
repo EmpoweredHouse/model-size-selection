@@ -158,6 +158,25 @@ def to_label_int(label_str: str) -> int:
     return mapping[label_str]
 
 
+def normalize_label(raw: str) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    s = raw.strip().lower()
+    # common variations
+    aliases = {
+        "entails": "entailment",
+        "entailed": "entailment",
+        "entail": "entailment",
+        "contradicts": "contradiction",
+        "contradicted": "contradiction",
+        "contradict": "contradiction",
+    }
+    s = aliases.get(s, s)
+    if s in {"entailment", "neutral", "contradiction"}:
+        return s
+    return None
+
+
 def _extract_json(text: str) -> dict:
     text = text.strip()
     try:
@@ -255,6 +274,8 @@ def run_gemma_classification_core(
     results: list[dict] = []
     times: list[float] = []
 
+    invalid_outputs = 0
+
     if classification_mode == "batch":
         total = len(test_inputs)
         indices = list(range(0, total, batch_size))
@@ -271,8 +292,15 @@ def run_gemma_classification_core(
             times.append(t1 - t0)
             if not isinstance(parsed, dict) or "classifications" not in parsed:
                 # best-effort fallback: skip this batch on parse failure
+                invalid_outputs += len(batch_items)
                 continue
-            results.extend(parsed["classifications"])  # list of {label, reasoning}
+            # validate and normalize each item
+            for cls in parsed["classifications"]:
+                lbl = normalize_label(cls.get("label")) if isinstance(cls, dict) else None
+                if lbl is None:
+                    invalid_outputs += 1
+                    continue
+                results.append({"label": lbl, "reasoning": (cls.get("reasoning") if isinstance(cls, dict) else "") or ""})
     else:
         total = len(test_inputs)
         end_index = total if max_examples is None else min(max_examples, total)
@@ -284,8 +312,13 @@ def run_gemma_classification_core(
             t1 = time.time()
             times.append(t1 - t0)
             if not isinstance(parsed, dict) or "label" not in parsed:
+                invalid_outputs += 1
                 continue
-            results.append({"label": parsed["label"], "reasoning": parsed.get("reasoning", "")})
+            lbl = normalize_label(parsed.get("label"))
+            if lbl is None:
+                invalid_outputs += 1
+                continue
+            results.append({"label": lbl, "reasoning": parsed.get("reasoning", "")})
 
     # Compute metrics
     y_pred: list[int] = []
@@ -299,7 +332,7 @@ def run_gemma_classification_core(
 
     acc = accuracy_score(y_true, y_pred) if y_pred else 0.0
     f1_macro = f1_score(y_true, y_pred, average="macro") if y_pred else 0.0
-    metrics_str = f"Accuracy: {acc:.4f}\nF1 Macro: {f1_macro:.4f}"
+    metrics_str = f"Accuracy: {acc:.4f}\nF1 Macro: {f1_macro:.4f}\nInvalid outputs skipped: {invalid_outputs}"
     classification_report_str = classification_report(y_true, y_pred, digits=4) if y_pred else ""
     comparison_str = classification_comparison(test_ds, results)
 
