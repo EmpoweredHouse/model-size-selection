@@ -10,6 +10,9 @@ from sklearn.metrics import accuracy_score, classification_report, f1_score
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from huggingface_hub import login as hf_login
+from dotenv import load_dotenv, find_dotenv
+
 
 # ----- Reuse the same few-shot examples and prompts as in LLM_classifier -----
 
@@ -126,6 +129,25 @@ def build_user_prompt(batch_items: list[dict] | dict, fewshot_examples: list[dic
     return "\n\n".join(sections)
 
 
+def build_fewshot_chat_messages(fewshot_examples: list[dict]) -> list[dict]:
+    messages: list[dict] = []
+    for ex in fewshot_examples:
+        user_content = (
+            "Classify the following MNLI pair. Respond ONLY with JSON {label, reasoning}.\n\n"
+            + json.dumps({
+                "premise": ex["premise"],
+                "hypothesis": ex["hypothesis"],
+            }, ensure_ascii=False, indent=2)
+        )
+        assistant_content = json.dumps({
+            "label": ex["label"],
+            "reasoning": ex["reasoning"],
+        }, ensure_ascii=False)
+        messages.append({"role": "user", "content": user_content})
+        messages.append({"role": "assistant", "content": assistant_content})
+    return messages
+
+
 def to_label_str(label_int: int) -> str:
     mapping = {0: "entailment", 1: "neutral", 2: "contradiction"}
     return mapping[label_int]
@@ -155,10 +177,12 @@ def _extract_json(text: str) -> dict:
 
 
 def _prepare_chat_text(tokenizer, items: list[dict] | dict, fewshot_examples: list[dict]) -> str:
-    messages = [
-        {"role": "system", "content": build_system_prompt(items)},
-        {"role": "user", "content": build_user_prompt(items, fewshot_examples)},
-    ]
+    # Build few-shot as proper user/assistant alternations, then final user instruction
+    messages = build_fewshot_chat_messages(fewshot_examples)
+    final_user = (
+        build_system_prompt(items) + "\n\n" + build_user_prompt(items, fewshot_examples=[])
+    )
+    messages.append({"role": "user", "content": final_user})
     return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
 
@@ -170,7 +194,6 @@ def _generate_json(model, tokenizer, prompt_text: str, max_new_tokens: int = 512
             **inputs,
             max_new_tokens=max_new_tokens,
             do_sample=False,
-            temperature=0.0,
             eos_token_id=tokenizer.eos_token_id,
             pad_token_id=tokenizer.eos_token_id,
         )
@@ -201,11 +224,12 @@ def load_gemma_model(model_name: Literal[
     torch_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch_dtype,
-        device_map="auto",
+        dtype=torch_dtype,  # use new arg name to avoid deprecation warning
+        device_map=None,    # load without accelerate hooks so we can .to("cuda") explicitly
+        low_cpu_mem_usage=True,
     )
     if torch.cuda.is_available():
-        model.to("cuda")
+        model = model.to("cuda")
     load_time = time.time() - start
     return tokenizer, model, load_time
 
@@ -299,6 +323,14 @@ def run_gemma_classification_core(
 
 
 if __name__ == "__main__":
+    load_dotenv(find_dotenv())
+    try:
+        hf_token = os.environ.get("HUGGINGFACE_HUB_TOKEN")
+        if hf_token:
+            hf_login(token=hf_token, add_to_git_credential=False)
+    except Exception as e:
+        warnings.warn(f"Hugging Face login failed: {e}")
+    
     # Configure models to test
     models = [
         "google/gemma-7b-it",
