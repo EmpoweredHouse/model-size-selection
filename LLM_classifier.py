@@ -1,6 +1,7 @@
 from datetime import datetime
 import json
 import os
+import time
 from typing import Literal
 
 from datasets import load_dataset
@@ -8,6 +9,7 @@ from dotenv import load_dotenv, find_dotenv
 from openai import OpenAI
 from pydantic import BaseModel, Field
 from sklearn.metrics import accuracy_score, classification_report, f1_score
+import tiktoken
 from tqdm import tqdm
 
 
@@ -119,28 +121,16 @@ def get_fewshot_examples() -> list[dict]:
 
 
 def build_system_prompt(items: list[dict] | dict) -> str:
-    if isinstance(items, dict):
-        return (
-            "You are an expert natural language inference (NLI) classifier. "
-            "For the given (premise, hypothesis) pair, choose exactly one label:\n"
-            "- entailment: The hypothesis must be true given the premise.\n"
-            "- neutral: The hypothesis may be true or false; the premise is insufficient.\n"
-            "- contradiction: The hypothesis cannot be true given the premise.\n"
-            "Base your decision solely on the premise; do not rely on external knowledge. "
-            "Return strictly valid JSON matching the required schema."
-        )
-    elif isinstance(items, list):
-        return (
-            "You are an expert natural language inference (NLI) classifier. "
-            "For each (premise, hypothesis) pair, choose exactly one label:\n"
-            "- entailment: The hypothesis must be true given the premise.\n"
-            "- neutral: The hypothesis may be true or false; the premise is insufficient.\n"
-            "- contradiction: The hypothesis cannot be true given the premise.\n"
-            "Base your decision solely on the premise; do not rely on external knowledge. "
-            "Return strictly valid JSON matching the required schema."
-        )
-    else:
-        raise ValueError(f"Invalid items type: {type(items)}")
+    pair_text = "the given" if isinstance(items, dict) else "each"
+    return (
+        "You are an expert natural language inference (NLI) classifier. "
+        f"For {pair_text} (premise, hypothesis) pair, choose exactly one label:\n"
+        "- entailment: The hypothesis must be true given the premise.\n"
+        "- neutral: The hypothesis may be true or false; the premise is insufficient.\n"
+        "- contradiction: The hypothesis cannot be true given the premise.\n"
+        "Base your decision solely on the premise; do not rely on external knowledge. "
+        "Return strictly valid JSON matching the required schema."
+    )
         
 
 def build_user_prompt(batch_items: list[dict] | dict, fewshot_examples: list[dict]) -> str:
@@ -182,6 +172,28 @@ def build_user_prompt(batch_items: list[dict] | dict, fewshot_examples: list[dic
     return "\n\n".join(sections)
 
 
+def count_tokens(messages: list[dict], model: str) -> int:
+    """Count tokens in messages for a given model."""
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+    except KeyError:
+        # Fallback to cl100k_base for unknown models (GPT-4, etc.)
+        encoding = tiktoken.get_encoding("cl100k_base")
+    
+    total_tokens = 0
+    for message in messages:
+        # Add tokens for role and content
+        total_tokens += len(encoding.encode(message["role"]))
+        total_tokens += len(encoding.encode(message["content"]))
+        # Add overhead tokens per message (varies by model, using conservative estimate)
+        total_tokens += 4  # Approximate overhead per message
+    
+    # Add overhead for the conversation
+    total_tokens += 2  # Conversation overhead
+    
+    return total_tokens
+
+
 def _build_minimal_schema(is_single: bool) -> dict:
     single_schema = {
         "type": "object",
@@ -213,7 +225,7 @@ def call_openai_classification(
     model: str,
     items: list[dict] | dict,
     fewshot_examples: list[dict]
-) -> MNLIClassification | BatchMNLIClassification:
+) -> tuple[MNLIClassification | BatchMNLIClassification, float, int]:
     messages = [
         {"role": "system", "content": build_system_prompt(items)},
         {"role": "user", "content": build_user_prompt(items, fewshot_examples)},
@@ -221,10 +233,16 @@ def call_openai_classification(
     print(messages)
     is_single = isinstance(items, dict)
     minimal_schema = _build_minimal_schema(is_single)
+    
+    # Count input tokens
+    input_tokens = count_tokens(messages, model)
+    
+    # Measure time from request to response
+    start_time = time.time()
     completion = client.chat.completions.create(
         model=model,
         messages=messages,
-        temperature=0,
+        temperature=1 if model.startswith("gpt-5") else 0,
         response_format={
             "type": "json_schema",
             "json_schema": {
@@ -234,6 +252,8 @@ def call_openai_classification(
             },
         },
     )
+    end_time = time.time()
+    total_time = end_time - start_time
 
     message = completion.choices[0].message
     parsed_obj = getattr(message, "parsed", None)
@@ -241,7 +261,21 @@ def call_openai_classification(
         content = getattr(message, "content", None)
         parsed_obj = json.loads(content)
 
-    return MNLIClassification(**parsed_obj) if is_single else BatchMNLIClassification(**parsed_obj)
+    # Count output tokens (approximate)
+    response_content = content if parsed_obj is None else message.content
+    if response_content:
+        try:
+            encoding = tiktoken.encoding_for_model(model)
+        except KeyError:
+            encoding = tiktoken.get_encoding("cl100k_base")
+        output_tokens = len(encoding.encode(response_content))
+    else:
+        output_tokens = 0
+    
+    total_tokens = input_tokens + output_tokens
+    
+    result = MNLIClassification(**parsed_obj) if is_single else BatchMNLIClassification(**parsed_obj)
+    return result, total_time, total_tokens
 
 
 def run_classification(
@@ -252,7 +286,7 @@ def run_classification(
     max_batches: int | None = None,
     batch_size: int = 20, 
     present_results: Literal["file", "console", "none"] = "console",
-):
+) -> tuple[float, int]:
     load_dotenv(find_dotenv())
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -263,6 +297,8 @@ def run_classification(
     ]
 
     results: list[MNLIClassification] = []
+    times: list[float] = []
+    total_tokens = 0
     fewshot_examples = get_fewshot_examples()
 
     if classification_mode == "batch":
@@ -274,29 +310,36 @@ def run_classification(
         for start in tqdm(indices, desc="Classifying batches"):
             end = min(start + batch_size, total)
             batch_items = test_inputs[start:end]
-            parsed = call_openai_classification(client, model, batch_items, fewshot_examples)
+            parsed, request_time, request_tokens = call_openai_classification(client, model, batch_items, fewshot_examples)
             if not isinstance(parsed, BatchMNLIClassification):
                 raise TypeError("Expected BatchMNLIClassification in batch mode")
             results.extend(parsed.classifications)
+            times.append(request_time)
+            total_tokens += request_tokens
     else:
         total = len(test_inputs)
         end_index = total if max_examples is None else min(max_examples, total)
         for i in tqdm(range(0, end_index), desc="Classifying singles"):
             item = test_inputs[i]
-            parsed_single = call_openai_classification(client, model, item, fewshot_examples)
+            parsed_single, request_time, request_tokens = call_openai_classification(client, model, item, fewshot_examples)
             if not isinstance(parsed_single, MNLIClassification):
                 raise TypeError("Expected MNLIClassification in single mode")
             results.append(parsed_single)
+            times.append(request_time)
+            total_tokens += request_tokens
 
     y_pred: list[int] = []
     for result in results:
         y_pred.append(to_label_int(result.label))
     y_true: list[int] = [int(ex["label"]) for ex in test_ds][:len(y_pred)]
 
+    # Calculate average time
+    avg_time = sum(times) / len(times) if times else 0.0
+    
     # Basic evaluation
     acc = accuracy_score(y_true, y_pred)
     f1_macro = f1_score(y_true, y_pred, average="macro")
-    metrics_str = f"Accuracy: {acc:.4f}\nF1 Macro: {f1_macro:.4f}"
+    metrics_str = f"Accuracy: {acc:.4f}\nF1 Macro: {f1_macro:.4f}\nAvg Time: {avg_time:.4f}s\nTotal Tokens: {total_tokens}"
     classification_report_str = classification_report(y_true, y_pred, digits=4)
     comparison_str = classification_comparison(test_ds, results)
     if present_results == "console":
@@ -310,21 +353,44 @@ def run_classification(
             f.write(f"{metrics_str}\n\n{classification_report_str}\n\n{comparison_str}")
     else:
         pass
+    
+    return avg_time, total_tokens
 
 
 if __name__ == "__main__":
-    run_classification(
-        name="test", 
-        model="gpt-4o", 
+    model_name = "gpt-5"
+    # Run single classification
+    single_time, single_tokens = run_classification(
+        name="baseline_single", 
+        model=model_name, 
         present_results="file",
         classification_mode="single",
-        max_examples=100,
+        max_examples=1000,
     )
-    run_classification(
-        name="test", 
-        model="gpt-4o-mini", 
+    
+    # Run batch classification
+    batch_time, batch_tokens = run_classification(
+        name="baseline_batch", 
+        model=model_name, 
         present_results="file",
         classification_mode="batch",
         batch_size=10,
-        max_batches=10,
+        max_batches=100,
     )
+    
+    # Save timing and token results to JSON
+    timing_results = {
+        "single_1000_avg": {
+            "avg_total_time": round(single_time, 3),
+            "total_tokens": single_tokens
+        },
+        "batch10_100_avg": {
+            "avg_total_time": round(batch_time, 3),
+            "total_tokens": batch_tokens
+        }
+    }
+    
+    os.makedirs("latency", exist_ok=True)
+    timestamp = datetime.now().strftime('%m-%d_%H-%M')
+    with open(f"latency/{model_name}_{timestamp}.json", "w") as f:
+        json.dump(timing_results, f, indent=2)
