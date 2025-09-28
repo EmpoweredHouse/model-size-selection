@@ -1,8 +1,11 @@
 import os
+import sys
 import json
 import time
 import statistics
 import gc
+import argparse
+import subprocess
 from typing import List, Dict
 
 import torch
@@ -213,6 +216,50 @@ def _merge_lora_to_dir(local_ckpt_path: str, device: str, save_dir: str) -> floa
     return merge_seconds
 
 
+def _child_once(checkpoint_path: str) -> None:
+    """Child mode: perform a single cold-start load and print JSON with the time.
+
+    This function should not print anything else to stdout.
+    """
+    # Load environment and HF auth for remote models (e.g., google/*)
+    try:
+        load_dotenv(find_dotenv())
+    except Exception:
+        pass
+    try:
+        hf_token = os.environ.get("HUGGINGFACE_HUB_TOKEN")
+        if hf_token:
+            hf_login(token=hf_token, add_to_git_credential=False)
+    except Exception:
+        pass
+
+    # Force device detection per process to include CUDA context init cost
+    _ = detect_device()
+
+    # Resolve checkpoint path in the child (for artifact URIs/HF/local)
+    local_path, _ = resolve_checkpoint_path(checkpoint_path)
+
+    # Measure a single load
+    seconds = _load_once(local_ckpt_path=local_path, merge_lora=False, device=detect_device())
+    # Print strictly JSON for parent to parse
+    print(json.dumps({"time": seconds}))
+
+
+def _run_child_process_once(checkpoint_path: str) -> float:
+    """Spawn a fresh Python process to perform one load and return the measured seconds."""
+    cmd = [sys.executable, os.path.abspath(__file__), "--child", "--checkpoint_path", checkpoint_path]
+    result = subprocess.run(cmd, capture_output=True, text=True, env=os.environ.copy())
+    if result.returncode != 0:
+        raise RuntimeError(f"Child process failed: {result.stderr.strip()}")
+    # Expect a single JSON object on stdout
+    line = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "{}"
+    try:
+        obj = json.loads(line)
+        return float(obj.get("time"))
+    except Exception as e:
+        raise RuntimeError(f"Failed to parse child output: '{line}'. Error: {e}")
+
+
 def run_benchmark():
     # Load environment and HF auth for remote models (e.g., google/*)
     try:
@@ -260,10 +307,11 @@ def run_benchmark():
             # Load the provided checkpoint as-is (either LoRA without merge, or full)
             load_path = local_ckpt_path
 
+        # Always measure cold starts by spawning a fresh process per iteration
         for i in range(BENCHMARK_RUNS):
-            secs = _load_once(local_ckpt_path=load_path, merge_lora=False, device=device)
+            secs = _run_child_process_once(checkpoint_path=load_path)
             times.append(secs)
-            print(f"Run {i+1}/{BENCHMARK_RUNS}: {secs:.6f}s")
+            print(f"Run {i+1}/{BENCHMARK_RUNS} (cold): {secs:.6f}s")
 
         avg_time = round(statistics.mean(times), 6) if times else None
 
@@ -346,6 +394,16 @@ def run_benchmark():
 
 
 if __name__ == "__main__":
-    run_benchmark()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--child", action="store_true", help="Run a single cold-start load and print time as JSON")
+    parser.add_argument("--checkpoint_path", type=str, default=None, help="Checkpoint path for child mode")
+    args = parser.parse_args()
+
+    if args.child:
+        if not args.checkpoint_path:
+            raise SystemExit("--checkpoint_path is required in --child mode")
+        _child_once(checkpoint_path=args.checkpoint_path)
+    else:
+        run_benchmark()
 
 
