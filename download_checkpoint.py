@@ -15,6 +15,7 @@ if not os.environ.get("MLFLOW_TRACKING_URI"):
 
 # Your artifact URI here - replace with actual URI
 artifact_uri = "dbfs:/databricks/mlflow-tracking/<rest of the uri>"  # Update this
+checkpoint_dir = "/workspace/checkpoints"
 
 # Optional CLI override for artifact_uri
 parser = argparse.ArgumentParser(description="Download MLflow artifacts to a local directory")
@@ -24,12 +25,19 @@ parser.add_argument(
     default=None,
     help="Override the default artifact URI defined in the script",
 )
+parser.add_argument(
+    "--checkpoint-dir",
+    dest="checkpoint_dir",
+    default=None,
+    help="Override the default checkpoints directory",
+)
 args = parser.parse_args()
 if args.cli_artifact_uri:
     artifact_uri = args.cli_artifact_uri
+if args.checkpoint_dir:
+    checkpoint_dir = args.checkpoint_dir
 
 # Create checkpoints directory
-checkpoint_dir = "/workspace/checkpoints"
 os.makedirs(checkpoint_dir, exist_ok=True)
 
 # Download artifacts
