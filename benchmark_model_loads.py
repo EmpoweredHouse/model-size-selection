@@ -21,7 +21,7 @@ from dotenv import load_dotenv, find_dotenv
 from huggingface_hub import login as hf_login
 
 # Hardcoded benchmark config
-BENCHMARK_RUNS = 10
+BENCHMARK_RUNS = 11
 BENCHMARK_OUTPUT = "model_load_benchmark.json"
 
 VARIANTS: List[Dict] = [
@@ -253,7 +253,7 @@ def _merge_child_once(checkpoint_path: str, save_dir: str) -> None:
     if not is_lora:
         try:
             os.makedirs(save_dir, exist_ok=True)
-            model.save_pretrained(save_dir)
+            model.save_pretrained(save_dir, safe_serialization=True)
             tokenizer.save_pretrained(save_dir)
             print(json.dumps({"merge_time": 0.0}))
             return
@@ -271,7 +271,7 @@ def _merge_child_once(checkpoint_path: str, save_dir: str) -> None:
 
     # Save merged
     os.makedirs(save_dir, exist_ok=True)
-    merged_model.save_pretrained(save_dir)
+    merged_model.save_pretrained(save_dir, safe_serialization=True)
     tokenizer.save_pretrained(save_dir)
 
     try:
@@ -369,32 +369,43 @@ def run_benchmark():
             except Exception:
                 pass
 
-    # Group variants by model id to run each model's variants together per iteration
-    # Run BENCHMARK_RUNS iterations; in each iteration, run each variant once
-    # Order per iteration: full-false for all models, then lora-false for all models, then lora-true for all models
+    # Build model list preserving input order
+    models_order: List[str] = []
+    model_to_variants: Dict[str, List[Dict]] = {}
+    for v in prepared_variants:
+        model = v["run_name"].split("-", 1)[0]
+        if model not in model_to_variants:
+            models_order.append(model)
+            model_to_variants[model] = []
+        model_to_variants[model].append(v)
+
+    # Phase order per iteration: full-false, lora-false, lora-true, but rotate starting model to reduce cross-model cache bias
     for i in range(BENCHMARK_RUNS):
         print(f"\n=== Iteration {i+1}/{BENCHMARK_RUNS} ===")
+        rotation = i % len(models_order) if models_order else 0
+        rotated_models = models_order[rotation:] + models_order[:rotation]
         phases = [("full", False), ("LoRA", False), ("LoRA", True)]
         for ckpt_type, merge_flag in phases:
-            for v in prepared_variants:
-                if v["ckpt_type"] == ckpt_type and v["merge_lora"] == merge_flag:
-                    print(f"Running: {v['run_name']}")
-                    # Clear per-iteration caches for better isolation
-                    os.environ["TRANSFORMERS_CACHE"] = os.path.join("tmp", f"hf_cache_{i}")
-                    os.environ["HF_HOME"] = os.path.join("tmp", f"hf_home_{i}")
-                    os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join("tmp", f"hf_hub_{i}")
-                    secs = _run_child_process_once(checkpoint_path=v["load_path"])
-                    # Append to corresponding record
-                    for rec in results:
-                        if rec["run_name"] == v["run_name"]:
-                            rec["times"].append(secs)
-                            break
-                    print(f"  Time (cold): {secs:.6f}s")
+            for model in rotated_models:
+                for v in model_to_variants[model]:
+                    if v["ckpt_type"] == ckpt_type and v["merge_lora"] == merge_flag:
+                        print(f"Running: {v['run_name']}")
+                        os.environ["TRANSFORMERS_CACHE"] = os.path.join("tmp", f"hf_cache_{i}")
+                        os.environ["HF_HOME"] = os.path.join("tmp", f"hf_home_{i}")
+                        os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join("tmp", f"hf_hub_{i}")
+                        secs = _run_child_process_once(checkpoint_path=v["load_path"])
+                        for rec in results:
+                            if rec["run_name"] == v["run_name"]:
+                                rec["times"].append(secs)
+                                break
+                        print(f"  Time (cold): {secs:.6f}s")
 
-    # Compute averages
+    # Compute averages (exclude first cold start from avg; record it separately)
     for rec in results:
         if rec["times"]:
-            rec["avg_time"] = round(statistics.mean(rec["times"]), 6)
+            rec["cold_start_time"] = rec["times"][0]
+            rest = rec["times"][1:] if len(rec["times"]) > 1 else []
+            rec["avg_time"] = round(statistics.mean(rest), 6) if rest else rec["cold_start_time"]
 
     # Post-process: approximate adapter swap time for LoRA (merge_lora == False)
     # Strategy: use adapter_config.json to find base model name and compare against a base/full record.
