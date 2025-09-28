@@ -2,6 +2,7 @@ import os
 import json
 import time
 import statistics
+import gc
 from typing import List, Dict
 
 import torch
@@ -13,7 +14,8 @@ from model_inference import (
     load_model,
     is_lora_checkpoint,
 )
-
+from dotenv import load_dotenv, find_dotenv
+from huggingface_hub import login as hf_login
 
 # Hardcoded benchmark config
 BENCHMARK_RUNS = 10
@@ -21,28 +23,48 @@ BENCHMARK_OUTPUT = "model_load_benchmark.json"
 
 VARIANTS: List[Dict] = [
     {
+        "run_name": "DistilBERT-full-false",
+        "checkpoint_path": "./checkpoints/ex09_distilbert_full_ce_lr1.5e-5_wd0.02_wu8/best_checkpoint",
+        "merge_lora": False,
+    },
+    {
         "run_name": "DistilBERT-lora-false",
-        "checkpoint_path": "./checkpoints/distilbert-lora",
+        "checkpoint_path": "./checkpoints/ex10_distilbert_lora_r32_lr2e-4/best_checkpoint",
         "merge_lora": False,
     },
     {
         "run_name": "DistilBERT-lora-true",
-        "checkpoint_path": "./checkpoints/distilbert-lora",
+        "checkpoint_path": "./checkpoints/ex10_distilbert_lora_r32_lr2e-4/best_checkpoint",
         "merge_lora": True,
     },
     {
-        "run_name": "DistilBERT-full-false",
-        "checkpoint_path": "./checkpoints/distilbert-full",
+        "run_name": "RoBERTa-full-false",
+        "checkpoint_path": "./checkpoints/ex12_roberta_full_baseline/best_checkpoint",
         "merge_lora": False,
     },
     {
-        "run_name": "Gemma2B-full-true",
-        "checkpoint_path": "./checkpoints/Gemma2B-lora",
+        "run_name": "RoBERTa-lora-false",
+        "checkpoint_path": "./checkpoints/ex11_roberta_lora_baseline/best_checkpoint",
         "merge_lora": False,
     },
     {
-        "run_name": "Gemma2B-lora-true",
-        "checkpoint_path": "./checkpoints/Gemma2B-lora",
+        "run_name": "RoBERTa-lora-true",
+        "checkpoint_path": "./checkpoints/ex11_roberta_lora_baseline/best_checkpoint",
+        "merge_lora": True,
+    },
+    {
+        "run_name": "DeBERTa_v2_xlarge-full-false",
+        "checkpoint_path": "./checkpoints/ex14_deberta_v2_xl_fullft_baseline/best_checkpoint",
+        "merge_lora": False,
+    },
+    {
+        "run_name": "DeBERTa_v2_xlarge-lora-false",
+        "checkpoint_path": "./checkpoints/ex15_deberta_v2_xl_lora_stabilized_lr8e-5_wu10_r16/best_checkpoint",
+        "merge_lora": False,
+    },
+    {
+        "run_name": "DeBERTa_v2_xlarge-lora-true",
+        "checkpoint_path": "./checkpoints/ex15_deberta_v2_xl_lora_stabilized_lr8e-5_wu10_r16/best_checkpoint",
         "merge_lora": True,
     },
     {
@@ -50,13 +72,45 @@ VARIANTS: List[Dict] = [
         "checkpoint_path": "google/gemma-2b",
         "merge_lora": False,
     },
+    {
+        "run_name": "Gemma2B-lora-false",
+        "checkpoint_path": "./checkpoints/ex06_gemma2b_lora_bigger_lora/best_checkpoint",
+        "merge_lora": False,
+    },
+    {
+        "run_name": "Gemma2B-lora-true",
+        "checkpoint_path": "./checkpoints/ex06_gemma2b_lora_bigger_lora/best_checkpoint",
+        "merge_lora": True,
+    },
+    {
+        "run_name": "Gemma7B-full-false",
+        "checkpoint_path": "google/gemma-7b",
+        "merge_lora": False,
+    },
+    {
+        "run_name": "Gemma7B-lora-false",
+        "checkpoint_path": "./checkpoints/ex08_gemma7b_lora_bigger_stable/best_checkpoint",
+        "merge_lora": False,
+    },
+    {
+        "run_name": "Gemma7B-lora-true",
+        "checkpoint_path": "./checkpoints/ex08_gemma7b_lora_bigger_stable/best_checkpoint",
+        "merge_lora": True,
+    },
 ]
 
 
 def _clear_gpu_memory():
     try:
+        # Ensure Python references are released and GC runs
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            # Reclaim inter-process cached blocks if any
+            try:
+                torch.cuda.ipc_collect()
+            except Exception:
+                pass
             torch.cuda.synchronize()
     except Exception:
         pass
@@ -160,6 +214,18 @@ def _merge_lora_to_dir(local_ckpt_path: str, device: str, save_dir: str) -> floa
 
 
 def run_benchmark():
+    # Load environment and HF auth for remote models (e.g., google/*)
+    try:
+        load_dotenv(find_dotenv())
+    except Exception:
+        pass
+    try:
+        hf_token = os.environ.get("HUGGINGFACE_HUB_TOKEN")
+        if hf_token:
+            hf_login(token=hf_token, add_to_git_credential=False)
+    except Exception:
+        pass
+
     device = detect_device()
     print(f"Device: {device}")
     if device != "cuda":
