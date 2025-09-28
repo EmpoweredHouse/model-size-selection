@@ -119,11 +119,20 @@ def load_model(
                 base_model_name = None
         if not base_model_name:
             raise ValueError("LoRA adapter found but base_model_name_or_path missing in adapter_config.json")
+        # Prefer local base checkpoints if available
+        def _map_to_local_base(name: str) -> str:
+            local_dir = os.environ.get("LOCAL_CHECKPOINTS_DIR", "./checkpoints")
+            slug = name.strip().rstrip("/").split("/")[-1]
+            candidate = os.path.join(local_dir, slug)
+            return candidate if os.path.isdir(candidate) else name
 
+        base_source = _map_to_local_base(base_model_name)
+        local_only = os.path.isdir(base_source)
         base_model = AutoModelForSequenceClassification.from_pretrained(
-            base_model_name,
+            base_source,
             num_labels=3,
             problem_type="single_label_classification",
+            local_files_only=local_only,
             **load_kwargs,
         )
         # Ensure embedding size matches tokenizer if special tokens were added

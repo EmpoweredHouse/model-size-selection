@@ -31,18 +31,28 @@ VARIANTS: List[Dict] = [
         "merge_lora": False,
     },
     {
-        "run_name": "DistilBERT-lora-false",
-        "checkpoint_path": "./checkpoints/ex10_distilbert_lora_r32_lr2e-4/best_checkpoint",
+        "run_name": "RoBERTa-full-false",
+        "checkpoint_path": "./checkpoints/ex12_roberta_full_baseline/best_checkpoint",
         "merge_lora": False,
     },
     {
-        "run_name": "DistilBERT-lora-true",
-        "checkpoint_path": "./checkpoints/ex10_distilbert_lora_r32_lr2e-4/best_checkpoint",
-        "merge_lora": True,
+        "run_name": "DeBERTa_v2_xlarge-full-false",
+        "checkpoint_path": "./checkpoints/ex14_deberta_v2_xl_fullft_baseline/best_checkpoint",
+        "merge_lora": False,
     },
     {
-        "run_name": "RoBERTa-full-false",
-        "checkpoint_path": "./checkpoints/ex12_roberta_full_baseline/best_checkpoint",
+        "run_name": "Gemma2B-full-false",
+        "checkpoint_path": "./checkpoints/gemma2b-base-model",
+        "merge_lora": False,
+    },
+    {
+        "run_name": "Gemma7B-full-false",
+        "checkpoint_path": "./checkpoints/gemma7b-base-model",
+        "merge_lora": False,
+    },
+    {
+        "run_name": "DistilBERT-lora-false",
+        "checkpoint_path": "./checkpoints/ex10_distilbert_lora_r32_lr2e-4/best_checkpoint",
         "merge_lora": False,
     },
     {
@@ -51,28 +61,8 @@ VARIANTS: List[Dict] = [
         "merge_lora": False,
     },
     {
-        "run_name": "RoBERTa-lora-true",
-        "checkpoint_path": "./checkpoints/ex11_roberta_lora_baseline/best_checkpoint",
-        "merge_lora": True,
-    },
-    {
-        "run_name": "DeBERTa_v2_xlarge-full-false",
-        "checkpoint_path": "./checkpoints/ex14_deberta_v2_xl_fullft_baseline/best_checkpoint",
-        "merge_lora": False,
-    },
-    {
         "run_name": "DeBERTa_v2_xlarge-lora-false",
         "checkpoint_path": "./checkpoints/ex15_deberta_v2_xl_lora_stabilized_lr8e-5_wu10_r16/best_checkpoint",
-        "merge_lora": False,
-    },
-    {
-        "run_name": "DeBERTa_v2_xlarge-lora-true",
-        "checkpoint_path": "./checkpoints/ex15_deberta_v2_xl_lora_stabilized_lr8e-5_wu10_r16/best_checkpoint",
-        "merge_lora": True,
-    },
-    {
-        "run_name": "Gemma2B-full-false",
-        "checkpoint_path": "google/gemma-2b",
         "merge_lora": False,
     },
     {
@@ -81,19 +71,29 @@ VARIANTS: List[Dict] = [
         "merge_lora": False,
     },
     {
-        "run_name": "Gemma2B-lora-true",
-        "checkpoint_path": "./checkpoints/ex06_gemma2b_lora_bigger_lora/best_checkpoint",
-        "merge_lora": True,
-    },
-    {
-        "run_name": "Gemma7B-full-false",
-        "checkpoint_path": "google/gemma-7b",
-        "merge_lora": False,
-    },
-    {
         "run_name": "Gemma7B-lora-false",
         "checkpoint_path": "./checkpoints/ex08_gemma7b_lora_bigger_stable/best_checkpoint",
         "merge_lora": False,
+    },
+    {
+        "run_name": "DistilBERT-lora-true",
+        "checkpoint_path": "./checkpoints/ex10_distilbert_lora_r32_lr2e-4/best_checkpoint",
+        "merge_lora": True,
+    },
+    {
+        "run_name": "RoBERTa-lora-true",
+        "checkpoint_path": "./checkpoints/ex11_roberta_lora_baseline/best_checkpoint",
+        "merge_lora": True,
+    },
+    {
+        "run_name": "DeBERTa_v2_xlarge-lora-true",
+        "checkpoint_path": "./checkpoints/ex15_deberta_v2_xl_lora_stabilized_lr8e-5_wu10_r16/best_checkpoint",
+        "merge_lora": True,
+    },
+    {
+        "run_name": "Gemma2B-lora-true",
+        "checkpoint_path": "./checkpoints/ex06_gemma2b_lora_bigger_lora/best_checkpoint",
+        "merge_lora": True,
     },
     {
         "run_name": "Gemma7B-lora-true",
@@ -239,6 +239,18 @@ def _child_once(checkpoint_path: str) -> None:
     # Resolve checkpoint path in the child (for artifact URIs/HF/local)
     local_path, _ = resolve_checkpoint_path(checkpoint_path)
 
+    # Isolation knobs: point HF caches to per-process temp dirs to avoid cross-run reuse
+    # (Can be expensive; ensures more comparable IO.)
+    os.environ["TRANSFORMERS_CACHE"] = os.path.join("tmp", "hf_cache_child")
+    os.environ["HF_HOME"] = os.path.join("tmp", "hf_home_child")
+    os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join("tmp", "hf_hub_child")
+    os.makedirs(os.environ["TRANSFORMERS_CACHE"], exist_ok=True)
+    os.makedirs(os.environ["HF_HOME"], exist_ok=True)
+    os.makedirs(os.environ["HUGGINGFACE_HUB_CACHE"], exist_ok=True)
+
+    # Prefer local checkpoints for base models when loading LoRA
+    os.environ["LOCAL_CHECKPOINTS_DIR"] = os.path.abspath("./checkpoints")
+
     # Measure a single load
     seconds = _load_once(local_ckpt_path=local_path, merge_lora=False, device=detect_device())
     # Print strictly JSON for parent to parse
@@ -260,6 +272,93 @@ def _run_child_process_once(checkpoint_path: str) -> float:
         raise RuntimeError(f"Failed to parse child output: '{line}'. Error: {e}")
 
 
+def _merge_child_once(checkpoint_path: str, save_dir: str) -> None:
+    """Child mode: perform LoRA merge and save to save_dir. Print JSON with merge_time.
+
+    Ensures the process exits after merging to avoid keeping models resident.
+    """
+    try:
+        load_dotenv(find_dotenv())
+    except Exception:
+        pass
+    try:
+        hf_token = os.environ.get("HUGGINGFACE_HUB_TOKEN")
+        if hf_token:
+            hf_login(token=hf_token, add_to_git_credential=False)
+    except Exception:
+        pass
+
+    _ = detect_device()
+
+    local_path, _ = resolve_checkpoint_path(checkpoint_path)
+
+    # Isolate caches
+    os.environ["TRANSFORMERS_CACHE"] = os.path.join("tmp", "hf_cache_merge_child")
+    os.environ["HF_HOME"] = os.path.join("tmp", "hf_home_merge_child")
+    os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join("tmp", "hf_hub_merge_child")
+    os.makedirs(os.environ["TRANSFORMERS_CACHE"], exist_ok=True)
+    os.makedirs(os.environ["HF_HOME"], exist_ok=True)
+    os.makedirs(os.environ["HUGGINGFACE_HUB_CACHE"], exist_ok=True)
+
+    os.environ["LOCAL_CHECKPOINTS_DIR"] = os.path.abspath("./checkpoints")
+
+    # Load tokenizer and model (LoRA attached if adapter checkpoint)
+    tokenizer = load_tokenizer(local_path, None)
+    model, is_lora = load_model(
+        checkpoint_path=local_path,
+        tokenizer=tokenizer,
+        device=detect_device(),
+        merge_lora=False,
+    )
+
+    # If not LoRA, just save as-is
+    if not is_lora:
+        try:
+            os.makedirs(save_dir, exist_ok=True)
+            model.save_pretrained(save_dir)
+            tokenizer.save_pretrained(save_dir)
+            print(json.dumps({"merge_time": 0.0}))
+            return
+        finally:
+            try:
+                del model
+                del tokenizer
+            except Exception:
+                pass
+
+    start_ts = time.time()
+    merged_model = model.merge_and_unload()
+    end_ts = time.time()
+    merge_seconds = round(end_ts - start_ts, 6)
+
+    # Save merged
+    os.makedirs(save_dir, exist_ok=True)
+    merged_model.save_pretrained(save_dir)
+    tokenizer.save_pretrained(save_dir)
+
+    try:
+        del merged_model
+        del model
+        del tokenizer
+    except Exception:
+        pass
+    _clear_gpu_memory()
+    print(json.dumps({"merge_time": merge_seconds}))
+
+
+def _run_merge_child_process(checkpoint_path: str, save_dir: str) -> float:
+    cmd = [sys.executable, os.path.abspath(__file__), "--merge-child", "--checkpoint_path", checkpoint_path, "--save_dir", save_dir]
+    result = subprocess.run(cmd, capture_output=True, text=True, env=os.environ.copy())
+    if result.returncode != 0:
+        raise RuntimeError(f"Merge child process failed: {result.stderr.strip()}")
+    line = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "{}"
+    try:
+        obj = json.loads(line)
+        return float(obj.get("merge_time", 0.0))
+    except Exception as e:
+        raise RuntimeError(f"Failed to parse merge child output: '{line}'. Error: {e}")
+
+
 def run_benchmark():
     # Load environment and HF auth for remote models (e.g., google/*)
     try:
@@ -278,66 +377,90 @@ def run_benchmark():
     if device != "cuda":
         print("Warning: CUDA not available; results may not reflect GPU load times.")
 
+    # Prepare variants once (resolve paths, do single merges), then run per-iteration across models
+    prepared_variants: List[Dict] = []
     results: List[Dict] = []
 
+    def model_id_from_run_name(name: str) -> str:
+        return (name or "").split("-", 1)[0].strip()
+
     for variant in VARIANTS:
-        print(f"\n=== Running: {variant['run_name']} ===")
         checkpoint_path = variant["checkpoint_path"]
         merge_lora = bool(variant.get("merge_lora", False))
 
-        # Resolve path once per variant to avoid repeated downloads if using artifact URIs
         local_ckpt_path, tmp_dir = resolve_checkpoint_path(checkpoint_path)
-
-        # Pre-flight: print what type of checkpoint it is
         ckpt_type = "LoRA" if is_lora_checkpoint(local_ckpt_path) else "full"
-        print(f"Checkpoint type detected: {ckpt_type}")
 
-        times: List[float] = []
         lora_merge_time: float = 0.0
         merged_ckpt_for_load: str = None
-
         if ckpt_type == "LoRA" and merge_lora:
-            # Merge once (measure merge time only), save merged, then measure loads of merged model
             run_dir_name = _sanitize_name(variant.get("run_name") or os.path.basename(local_ckpt_path))
             merged_dir = os.path.join("tmp", "merged", run_dir_name)
-            lora_merge_time = _merge_lora_to_dir(local_ckpt_path=local_ckpt_path, device=device, save_dir=merged_dir)
+            # Merge in a separate process to avoid keeping model in memory
+            lora_merge_time = _run_merge_child_process(checkpoint_path=local_ckpt_path, save_dir=merged_dir)
             merged_ckpt_for_load = merged_dir
             load_path = merged_ckpt_for_load
         else:
-            # Load the provided checkpoint as-is (either LoRA without merge, or full)
             load_path = local_ckpt_path
 
-        # Always measure cold starts by spawning a fresh process per iteration
-        for i in range(BENCHMARK_RUNS):
-            secs = _run_child_process_once(checkpoint_path=load_path)
-            times.append(secs)
-            print(f"Run {i+1}/{BENCHMARK_RUNS} (cold): {secs:.6f}s")
-
-        avg_time = round(statistics.mean(times), 6) if times else None
-
-        # Build output record preserving input fields
-        record = {
+        prepared_variants.append({
             "run_name": variant.get("run_name"),
             "checkpoint_path": checkpoint_path,
             "merge_lora": merge_lora,
-            "times": times,
-            "avg_time": avg_time,
+            "ckpt_type": ckpt_type,
+            "load_path": load_path,
+            "lora_merge_time": lora_merge_time,
+            "merged_checkpoint_path": merged_ckpt_for_load,
+            "model_id": model_id_from_run_name(variant.get("run_name", "")),
+        })
+
+        rec = {
+            "run_name": variant.get("run_name"),
+            "checkpoint_path": checkpoint_path,
+            "merge_lora": merge_lora,
+            "times": [],
+            "avg_time": None,
             "device": device,
         }
         if ckpt_type == "LoRA" and merge_lora:
-            record["lora_merge_time"] = lora_merge_time
-            record["merged_checkpoint_path"] = merged_ckpt_for_load
-
-        results.append(record)
+            rec["lora_merge_time"] = lora_merge_time
+            rec["merged_checkpoint_path"] = merged_ckpt_for_load
+        results.append(rec)
 
         # Cleanup any temporary directory from artifact resolution
         if tmp_dir and os.path.isdir(tmp_dir):
             try:
-                # Best-effort cleanup; ignore failures
                 import shutil
                 shutil.rmtree(tmp_dir, ignore_errors=True)
             except Exception:
                 pass
+
+    # Group variants by model id to run each model's variants together per iteration
+    # Run BENCHMARK_RUNS iterations; in each iteration, run each variant once
+    # Order per iteration: full-false for all models, then lora-false for all models, then lora-true for all models
+    for i in range(BENCHMARK_RUNS):
+        print(f"\n=== Iteration {i+1}/{BENCHMARK_RUNS} ===")
+        phases = [("full", False), ("LoRA", False), ("LoRA", True)]
+        for ckpt_type, merge_flag in phases:
+            for v in prepared_variants:
+                if v["ckpt_type"] == ckpt_type and v["merge_lora"] == merge_flag:
+                    print(f"Running: {v['run_name']}")
+                    # Clear per-iteration caches for better isolation
+                    os.environ["TRANSFORMERS_CACHE"] = os.path.join("tmp", f"hf_cache_{i}")
+                    os.environ["HF_HOME"] = os.path.join("tmp", f"hf_home_{i}")
+                    os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join("tmp", f"hf_hub_{i}")
+                    secs = _run_child_process_once(checkpoint_path=v["load_path"])
+                    # Append to corresponding record
+                    for rec in results:
+                        if rec["run_name"] == v["run_name"]:
+                            rec["times"].append(secs)
+                            break
+                    print(f"  Time (cold): {secs:.6f}s")
+
+    # Compute averages
+    for rec in results:
+        if rec["times"]:
+            rec["avg_time"] = round(statistics.mean(rec["times"]), 6)
 
     # Post-process: approximate adapter swap time for LoRA (merge_lora == False)
     # Strategy: use adapter_config.json to find base model name and compare against a base/full record.
@@ -396,14 +519,19 @@ def run_benchmark():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--child", action="store_true", help="Run a single cold-start load and print time as JSON")
-    parser.add_argument("--checkpoint_path", type=str, default=None, help="Checkpoint path for child mode")
+    parser.add_argument("--merge-child", action="store_true", help="Run a single merge of LoRA and print merge_time as JSON")
+    parser.add_argument("--checkpoint_path", type=str, default=None, help="Checkpoint path for child/merge mode")
+    parser.add_argument("--save_dir", type=str, default=None, help="Save dir for merged model in merge-child mode")
     args = parser.parse_args()
 
     if args.child:
         if not args.checkpoint_path:
             raise SystemExit("--checkpoint_path is required in --child mode")
         _child_once(checkpoint_path=args.checkpoint_path)
+    elif args.merge_child:
+        if not args.checkpoint_path or not args.save_dir:
+            raise SystemExit("--checkpoint_path and --save_dir are required in --merge-child mode")
+        _merge_child_once(checkpoint_path=args.checkpoint_path, save_dir=args.save_dir)
     else:
         run_benchmark()
-
 
