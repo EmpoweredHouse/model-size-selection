@@ -26,80 +26,80 @@ BENCHMARK_OUTPUT = "model_load_benchmark.json"
 
 VARIANTS: List[Dict] = [
     {
-        "run_name": "DistilBERT-full-false",
-        "checkpoint_path": "./checkpoints/ex09_distilbert_full_ce_lr1.5e-5_wd0.02_wu8/best_checkpoint",
-        "merge_lora": False,
+        'run_name': 'DistilBERT-full-false',
+        'checkpoint_path': './checkpoints/ex09_distilbert_full_ce_lr1.5e-5_wd0.02_wu8/best_checkpoint',
+        'merge_lora': False
     },
     {
-        "run_name": "RoBERTa-full-false",
-        "checkpoint_path": "./checkpoints/ex12_roberta_full_baseline/best_checkpoint",
-        "merge_lora": False,
+        'run_name': 'DeBERTa_v2_xlarge-lora-false',
+        'checkpoint_path': './checkpoints/ex15_deberta_v2_xl_lora_stabilized_lr8e-5_wu10_r16/best_checkpoint',
+        'merge_lora': False
     },
     {
-        "run_name": "DeBERTa_v2_xlarge-full-false",
-        "checkpoint_path": "./checkpoints/ex14_deberta_v2_xl_fullft_baseline/best_checkpoint",
-        "merge_lora": False,
+        'run_name': 'Gemma7B-lora-true',
+        'checkpoint_path': './checkpoints/ex08_gemma7b_lora_bigger_stable/best_checkpoint',
+        'merge_lora': True
     },
     {
-        "run_name": "Gemma2B-full-false",
-        "checkpoint_path": "./checkpoints/gemma-2b",
-        "merge_lora": False,
+        'run_name': 'RoBERTa-full-false',
+        'checkpoint_path': './checkpoints/ex12_roberta_full_baseline/best_checkpoint',
+        'merge_lora': False
     },
     {
-        "run_name": "Gemma7B-full-false",
-        "checkpoint_path": "./checkpoints/gemma-7b",
-        "merge_lora": False,
+        'run_name': 'Gemma2B-lora-false',
+        'checkpoint_path': './checkpoints/ex06_gemma2b_lora_bigger_lora/best_checkpoint',
+        'merge_lora': False
     },
     {
-        "run_name": "DistilBERT-lora-false",
-        "checkpoint_path": "./checkpoints/ex10_distilbert_lora_r32_lr2e-4/best_checkpoint",
-        "merge_lora": False,
+        'run_name': 'DistilBERT-lora-true',
+        'checkpoint_path': './checkpoints/ex10_distilbert_lora_r32_lr2e-4/best_checkpoint',
+        'merge_lora': True
     },
     {
-        "run_name": "RoBERTa-lora-false",
-        "checkpoint_path": "./checkpoints/ex11_roberta_lora_baseline/best_checkpoint",
-        "merge_lora": False,
+        'run_name': 'DeBERTa_v2_xlarge-full-false',
+        'checkpoint_path': './checkpoints/ex14_deberta_v2_xl_fullft_baseline/best_checkpoint',
+        'merge_lora': False
     },
     {
-        "run_name": "DeBERTa_v2_xlarge-lora-false",
-        "checkpoint_path": "./checkpoints/ex15_deberta_v2_xl_lora_stabilized_lr8e-5_wu10_r16/best_checkpoint",
-        "merge_lora": False,
+        'run_name': 'Gemma7B-lora-false',
+        'checkpoint_path': './checkpoints/ex08_gemma7b_lora_bigger_stable/best_checkpoint',
+        'merge_lora': False
     },
     {
-        "run_name": "Gemma2B-lora-false",
-        "checkpoint_path": "./checkpoints/ex06_gemma2b_lora_bigger_lora/best_checkpoint",
-        "merge_lora": False,
+        'run_name': 'RoBERTa-lora-true',
+        'checkpoint_path': './checkpoints/ex11_roberta_lora_baseline/best_checkpoint',
+        'merge_lora': True
     },
     {
-        "run_name": "Gemma7B-lora-false",
-        "checkpoint_path": "./checkpoints/ex08_gemma7b_lora_bigger_stable/best_checkpoint",
-        "merge_lora": False,
+        'run_name': 'Gemma2B-full-false',
+        'checkpoint_path': './checkpoints/gemma-2b',
+        'merge_lora': False
     },
     {
-        "run_name": "DistilBERT-lora-true",
-        "checkpoint_path": "./checkpoints/ex10_distilbert_lora_r32_lr2e-4/best_checkpoint",
-        "merge_lora": True,
+        'run_name': 'DistilBERT-lora-false',
+        'checkpoint_path': './checkpoints/ex10_distilbert_lora_r32_lr2e-4/best_checkpoint',
+        'merge_lora': False
     },
     {
-        "run_name": "RoBERTa-lora-true",
-        "checkpoint_path": "./checkpoints/ex11_roberta_lora_baseline/best_checkpoint",
-        "merge_lora": True,
+        'run_name': 'DeBERTa_v2_xlarge-lora-true',
+        'checkpoint_path': './checkpoints/ex15_deberta_v2_xl_lora_stabilized_lr8e-5_wu10_r16/best_checkpoint',
+        'merge_lora': True
     },
     {
-        "run_name": "DeBERTa_v2_xlarge-lora-true",
-        "checkpoint_path": "./checkpoints/ex15_deberta_v2_xl_lora_stabilized_lr8e-5_wu10_r16/best_checkpoint",
-        "merge_lora": True,
+        'run_name': 'Gemma7B-full-false',
+        'checkpoint_path': './checkpoints/gemma-7b',
+        'merge_lora': False
     },
     {
-        "run_name": "Gemma2B-lora-true",
-        "checkpoint_path": "./checkpoints/ex06_gemma2b_lora_bigger_lora/best_checkpoint",
-        "merge_lora": True,
+        'run_name': 'RoBERTa-lora-false',
+        'checkpoint_path': './checkpoints/ex11_roberta_lora_baseline/best_checkpoint',
+        'merge_lora': False
     },
     {
-        "run_name": "Gemma7B-lora-true",
-        "checkpoint_path": "./checkpoints/ex08_gemma7b_lora_bigger_stable/best_checkpoint",
-        "merge_lora": True,
-    },
+        'run_name': 'Gemma2B-lora-true',
+        'checkpoint_path': './checkpoints/ex06_gemma2b_lora_bigger_lora/best_checkpoin
+        ', 'merge_lora': 
+        True}
 ]
 
 
@@ -369,36 +369,20 @@ def run_benchmark():
             except Exception:
                 pass
 
-    # Build model list preserving input order
-    models_order: List[str] = []
-    model_to_variants: Dict[str, List[Dict]] = {}
-    for v in prepared_variants:
-        model = v["run_name"].split("-", 1)[0]
-        if model not in model_to_variants:
-            models_order.append(model)
-            model_to_variants[model] = []
-        model_to_variants[model].append(v)
-
-    # Phase order per iteration: full-false, lora-false, lora-true, but rotate starting model to reduce cross-model cache bias
+    # Run in the exact order provided by VARIANTS for each iteration
     for i in range(BENCHMARK_RUNS):
         print(f"\n=== Iteration {i+1}/{BENCHMARK_RUNS} ===")
-        rotation = i % len(models_order) if models_order else 0
-        rotated_models = models_order[rotation:] + models_order[:rotation]
-        phases = [("full", False), ("LoRA", False), ("LoRA", True)]
-        for ckpt_type, merge_flag in phases:
-            for model in rotated_models:
-                for v in model_to_variants[model]:
-                    if v["ckpt_type"] == ckpt_type and v["merge_lora"] == merge_flag:
-                        print(f"Running: {v['run_name']}")
-                        os.environ["TRANSFORMERS_CACHE"] = os.path.join("tmp", f"hf_cache_{i}")
-                        os.environ["HF_HOME"] = os.path.join("tmp", f"hf_home_{i}")
-                        os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join("tmp", f"hf_hub_{i}")
-                        secs = _run_child_process_once(checkpoint_path=v["load_path"])
-                        for rec in results:
-                            if rec["run_name"] == v["run_name"]:
-                                rec["times"].append(secs)
-                                break
-                        print(f"  Time (cold): {secs:.6f}s")
+        os.environ["TRANSFORMERS_CACHE"] = os.path.join("tmp", f"hf_cache_{i}")
+        os.environ["HF_HOME"] = os.path.join("tmp", f"hf_home_{i}")
+        os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join("tmp", f"hf_hub_{i}")
+        for v in prepared_variants:
+            print(f"Running: {v['run_name']}")
+            secs = _run_child_process_once(checkpoint_path=v["load_path"])
+            for rec in results:
+                if rec["run_name"] == v["run_name"]:
+                    rec["times"].append(secs)
+                    break
+            print(f"  Time (cold): {secs:.6f}s")
 
     # Compute averages (exclude first cold start from avg; record it separately)
     for rec in results:
