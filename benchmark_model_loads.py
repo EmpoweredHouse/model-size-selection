@@ -42,12 +42,12 @@ VARIANTS: List[Dict] = [
     },
     {
         "run_name": "Gemma2B-full-false",
-        "checkpoint_path": "./checkpoints/gemma2b-base-model",
+        "checkpoint_path": "./checkpoints/gemma-2b",
         "merge_lora": False,
     },
     {
         "run_name": "Gemma7B-full-false",
-        "checkpoint_path": "./checkpoints/gemma7b-base-model",
+        "checkpoint_path": "./checkpoints/gemma-7b",
         "merge_lora": False,
     },
     {
@@ -151,69 +151,7 @@ def _sanitize_name(name: str) -> str:
     return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in (name or "merged"))
 
 
-def _ensure_dir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
-
-
-def _merge_lora_to_dir(local_ckpt_path: str, device: str, save_dir: str) -> float:
-    """Merge LoRA adapter into base weights and save to save_dir.
-
-    Returns merge time in seconds (merge only, excludes save time).
-    """
-    tokenizer = load_tokenizer(local_ckpt_path, None)
-    # Load as LoRA-attached model (no merge yet)
-    model, is_lora = load_model(
-        checkpoint_path=local_ckpt_path,
-        tokenizer=tokenizer,
-        device=device,
-        merge_lora=False,
-    )
-    if not is_lora:
-        # Nothing to merge
-        # Save tokenizer to ensure subsequent loads find it
-        _ensure_dir(save_dir)
-        try:
-            tokenizer.save_pretrained(save_dir)
-        except Exception:
-            pass
-        # Save model as-is
-        try:
-            model.save_pretrained(save_dir)
-        except Exception:
-            pass
-        try:
-            del model
-            del tokenizer
-        except Exception:
-            pass
-        _clear_gpu_memory()
-        return 0.0
-
-    # Measure merge only
-    start_ts = time.time()
-    merged_model = model.merge_and_unload()
-    end_ts = time.time()
-    merge_seconds = round(end_ts - start_ts, 6)
-
-    # Save merged model and tokenizer
-    _ensure_dir(save_dir)
-    try:
-        merged_model.save_pretrained(save_dir)
-    except Exception:
-        pass
-    try:
-        tokenizer.save_pretrained(save_dir)
-    except Exception:
-        pass
-
-    try:
-        del merged_model
-        del model
-        del tokenizer
-    except Exception:
-        pass
-    _clear_gpu_memory()
-    return merge_seconds
+# removed unused direct in-process merge helper; merging is done in a separate subprocess
 
 
 def _child_once(checkpoint_path: str) -> None:
@@ -381,9 +319,6 @@ def run_benchmark():
     prepared_variants: List[Dict] = []
     results: List[Dict] = []
 
-    def model_id_from_run_name(name: str) -> str:
-        return (name or "").split("-", 1)[0].strip()
-
     for variant in VARIANTS:
         checkpoint_path = variant["checkpoint_path"]
         merge_lora = bool(variant.get("merge_lora", False))
@@ -411,7 +346,6 @@ def run_benchmark():
             "load_path": load_path,
             "lora_merge_time": lora_merge_time,
             "merged_checkpoint_path": merged_ckpt_for_load,
-            "model_id": model_id_from_run_name(variant.get("run_name", "")),
         })
 
         rec = {
