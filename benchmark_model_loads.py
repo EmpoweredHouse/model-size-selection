@@ -97,9 +97,9 @@ VARIANTS: List[Dict] = [
     },
     {
         'run_name': 'Gemma2B-lora-true',
-        'checkpoint_path': './checkpoints/ex06_gemma2b_lora_bigger_lora/best_checkpoin
-        ', 'merge_lora': 
-        True}
+        'checkpoint_path': './checkpoints/ex06_gemma2b_lora_bigger_lora/best_checkpoint',
+        'merge_lora': True
+    }
 ]
 
 
