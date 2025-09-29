@@ -20,8 +20,7 @@ from model_inference import (
 from dotenv import load_dotenv, find_dotenv
 from huggingface_hub import login as hf_login
 
-# Hardcoded benchmark config
-BENCHMARK_RUNS = 11  # default; when scripting, you can run single-run mode and loop externally
+# Output file for a single-run result
 BENCHMARK_OUTPUT = "model_load_benchmark.json"
 
 
@@ -93,6 +92,7 @@ def _child_once(checkpoint_path: str) -> None:
     except Exception:
         pass
 
+    total_start = time.time()
     # Force device detection per process to include CUDA context init cost
     _ = detect_device()
 
@@ -112,13 +112,14 @@ def _child_once(checkpoint_path: str) -> None:
     os.environ["LOCAL_CHECKPOINTS_DIR"] = os.path.abspath("./checkpoints")
 
     # Measure a single load
-    seconds = _load_once(local_ckpt_path=local_path, merge_lora=False, device=detect_device())
+    load_seconds = _load_once(local_ckpt_path=local_path, merge_lora=False, device=detect_device())
+    total_seconds = round(time.time() - total_start, 6)
     # Print strictly JSON for parent to parse
-    print(json.dumps({"time": seconds}))
+    print(json.dumps({"time": load_seconds, "total_time": total_seconds}))
 
 
-def _run_child_process_once(checkpoint_path: str) -> float:
-    """Spawn a fresh Python process to perform one load and return the measured seconds."""
+def _run_child_process_once(checkpoint_path: str) -> Dict[str, float]:
+    """Spawn a fresh Python process to perform one load and return measured times."""
     cmd = [sys.executable, os.path.abspath(__file__), "--child", "--checkpoint_path", checkpoint_path]
     result = subprocess.run(cmd, capture_output=True, text=True, env=os.environ.copy())
     if result.returncode != 0:
@@ -127,7 +128,7 @@ def _run_child_process_once(checkpoint_path: str) -> float:
     line = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else "{}"
     try:
         obj = json.loads(line)
-        return float(obj.get("time"))
+        return {"time": float(obj.get("time")), "total_time": float(obj.get("total_time", obj.get("time")))}
     except Exception as e:
         raise RuntimeError(f"Failed to parse child output: '{line}'. Error: {e}")
 
@@ -271,8 +272,10 @@ def run_benchmark_single(run_name: str, checkpoint_path: str, merge_lora: bool):
         "run_name": run_name,
         "checkpoint_path": checkpoint_path,
         "merge_lora": bool(merge_lora),
-        "times": [],
-        "avg_time": None,
+        "times": [],            # model load only (single value array)
+        "times_total": [],      # total preparation time (single value array)
+        "time": None,           # single value for convenience
+        "total_time": None,     # single value for convenience
         "device": device,
     }
     if ckpt_type == "LoRA" and merge_lora:
@@ -288,24 +291,22 @@ def run_benchmark_single(run_name: str, checkpoint_path: str, merge_lora: bool):
         except Exception:
             pass
 
-    # Run the single variant BENCHMARK_RUNS times
-    for i in range(BENCHMARK_RUNS):
-        print(f"\n=== Iteration {i+1}/{BENCHMARK_RUNS} ===")
-        os.environ["TRANSFORMERS_CACHE"] = os.path.join("tmp", f"hf_cache_{i}")
-        os.environ["HF_HOME"] = os.path.join("tmp", f"hf_home_{i}")
-        os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join("tmp", f"hf_hub_{i}")
-        v = prepared_variants[0]
-        print(f"Running: {v['run_name']}")
-        secs = _run_child_process_once(checkpoint_path=v["load_path"])
-        results[0]["times"].append(secs)
-        print(f"  Time (cold): {secs:.6f}s")
+    # Single run only (no internal iterations). Caches isolated once.
+    os.environ["TRANSFORMERS_CACHE"] = os.path.join("tmp", "hf_cache_single")
+    os.environ["HF_HOME"] = os.path.join("tmp", "hf_home_single")
+    os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join("tmp", "hf_hub_single")
+    v = prepared_variants[0]
+    print(f"Running: {v['run_name']}")
+    meas = _run_child_process_once(checkpoint_path=v["load_path"])
+    results[0]["times"].append(meas["time"])
+    results[0]["times_total"].append(meas["total_time"])
+    results[0]["time"] = meas["time"]
+    results[0]["total_time"] = meas["total_time"]
+    print(f"  Time (load): {meas['time']:.6f}s | Total: {meas['total_time']:.6f}s")
 
-    # Compute averages (exclude first cold start from avg; record it separately)
+    # Finalize single-run stats
     rec = results[0]
-    if rec["times"]:
-        rec["cold_start_time"] = rec["times"][0]
-        rest = rec["times"][1:] if len(rec["times"]) > 1 else []
-        rec["avg_time"] = round(statistics.mean(rest), 6) if rest else rec["cold_start_time"]
+    # No averages/cold_start beyond single values in single-run mode
 
     # Post-process: approximate adapter swap time for LoRA (merge_lora == False)
     # Strategy: use adapter_config.json to find base model name and compare against a base/full record.
@@ -317,11 +318,11 @@ def run_benchmark_single(run_name: str, checkpoint_path: str, merge_lora: bool):
     avg_time_by_checkpoint_path = {}
     full_false_time_by_prefix = {}
     cp = rec.get("checkpoint_path")
-    if cp is not None and rec.get("avg_time") is not None and rec.get("merge_lora") is False:
-        avg_time_by_checkpoint_path[cp] = rec["avg_time"]
+    if cp is not None and rec.get("time") is not None and rec.get("merge_lora") is False:
+        avg_time_by_checkpoint_path[cp] = rec["time"]
     rn = rec.get("run_name", "").lower()
-    if "full-false" in rn and rec.get("avg_time") is not None:
-        full_false_time_by_prefix[_run_prefix(rec.get("run_name", ""))] = rec["avg_time"]
+    if "full-false" in rn and rec.get("time") is not None:
+        full_false_time_by_prefix[_run_prefix(rec.get("run_name", ""))] = rec["time"]
 
     def _adapter_base_name(local_path: str) -> str:
         try:
@@ -344,8 +345,8 @@ def run_benchmark_single(run_name: str, checkpoint_path: str, merge_lora: bool):
                     base_time = avg_time_by_checkpoint_path[base_name]
                 if base_time is None:
                     base_time = full_false_time_by_prefix.get(_run_prefix(rec.get("run_name", "")))
-                if base_time is not None and rec.get("avg_time") is not None:
-                    rec["adapter_swap_time_approx"] = max(0.0, round(rec["avg_time"] - base_time, 6))
+                if base_time is not None and rec.get("time") is not None:
+                    rec["adapter_swap_time_approx"] = max(0.0, round(rec["time"] - base_time, 6))
     except Exception:
         pass
 
@@ -359,10 +360,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--child", action="store_true", help="Run a single cold-start load and print time as JSON")
     parser.add_argument("--merge-child", action="store_true", help="Run a single merge of LoRA and print merge_time as JSON")
-    parser.add_argument("--single", action="store_true", help="Run benchmark for a single variant (use with --run_name, --checkpoint_path, --merge_lora)")
-    parser.add_argument("--run_name", type=str, default=None, help="Run name for single mode")
-    parser.add_argument("--checkpoint_path", type=str, default=None, help="Checkpoint path for child/merge/single mode")
-    parser.add_argument("--merge_lora", type=str, default="false", help="Whether to merge LoRA in single mode (true/false)")
+    parser.add_argument("--run_name", type=str, default=None, help="Run name")
+    parser.add_argument("--checkpoint_path", type=str, default=None, help="Checkpoint path (full or LoRA)")
+    parser.add_argument("--merge_lora", type=str, default="false", help="Whether to merge LoRA (true/false)")
     parser.add_argument("--save_dir", type=str, default=None, help="Save dir for merged model in merge-child mode")
     args = parser.parse_args()
 
@@ -374,12 +374,10 @@ if __name__ == "__main__":
         if not args.checkpoint_path or not args.save_dir:
             raise SystemExit("--checkpoint_path and --save_dir are required in --merge-child mode")
         _merge_child_once(checkpoint_path=args.checkpoint_path, save_dir=args.save_dir)
-    elif args.single:
-        if not args.run_name or not args.checkpoint_path:
-            raise SystemExit("--run_name and --checkpoint_path are required in --single mode")
-        ml = args.merge_lora.lower() in ("1", "true", "yes")
-        run_benchmark_single(run_name=args.run_name, checkpoint_path=args.checkpoint_path, merge_lora=ml)
     else:
-        # Backward compatibility: expect env/VARIANTS external wrapper to call --single repeatedly
-        raise SystemExit("Specify --single with --run_name, --checkpoint_path, --merge_lora; or use child/merge-child modes.")
+        # Default: run a single measurement with provided args
+        if not args.run_name or not args.checkpoint_path:
+            raise SystemExit("--run_name and --checkpoint_path are required")
+        ml = str(args.merge_lora).lower() in ("1", "true", "yes")
+        run_benchmark_single(run_name=args.run_name, checkpoint_path=args.checkpoint_path, merge_lora=ml)
 

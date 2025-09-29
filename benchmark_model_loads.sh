@@ -23,15 +23,14 @@ VARIANTS=(
 RUNS=${RUNS:-11}
 
 mkdir -p results
-idx=1
-for entry in "${VARIANTS[@]}"; do
-  read -r RUN_NAME CKPT MERGE <<<"$entry"
-  echo "=== Variant: $RUN_NAME (merge_lora=$MERGE) ==="
-  for i in $(seq 1 "$RUNS"); do
-    BENCHMARK_RUNS=1 python benchmark_model_loads.py --single --run_name "$RUN_NAME" --checkpoint_path "$CKPT" --merge_lora "$MERGE"
-    mv model_load_benchmark.json "results/${RUN_NAME//\//_}_run_${i}.json"
+for i in $(seq 1 "$RUNS"); do
+  echo "=== Iteration $i/$RUNS ==="
+  for entry in "${VARIANTS[@]}"; do
+    read -r RUN_NAME CKPT MERGE <<<"$entry"
+    echo "--- Variant: $RUN_NAME (merge_lora=$MERGE) ---"
+    BENCHMARK_RUNS=1 python benchmark_model_loads.py --run_name "$RUN_NAME" --checkpoint_path "$CKPT" --merge_lora "$MERGE"
+    mv model_load_benchmark.json "results/${RUN_NAME//\//_}_iter_${i}.json"
   done
-  idx=$((idx+1))
 done
 
 echo "Done. Aggregates can be produced with a separate script/jupyter."
