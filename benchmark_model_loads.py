@@ -220,7 +220,7 @@ def _run_merge_child_process(checkpoint_path: str, save_dir: str) -> float:
         raise RuntimeError(f"Failed to parse merge child output: '{line}'. Error: {e}")
 
 
-def run_benchmark_single(run_name: str, checkpoint_path: str, merge_lora: bool):
+def run_benchmark_single(run_name: str, checkpoint_path: str, merge_lora: bool, reuse_merged: bool = True):
     # Load environment and HF auth for remote models (e.g., google/*)
     try:
         load_dotenv(find_dotenv())
@@ -251,10 +251,24 @@ def run_benchmark_single(run_name: str, checkpoint_path: str, merge_lora: bool):
     if ckpt_type == "LoRA" and merge_lora:
         run_dir_name = _sanitize_name(run_name or os.path.basename(local_ckpt_path))
         merged_dir = os.path.join("tmp", "merged", run_dir_name)
-        # Merge in a separate process to avoid keeping model in memory
-        lora_merge_time = _run_merge_child_process(checkpoint_path=local_ckpt_path, save_dir=merged_dir)
-        merged_ckpt_for_load = merged_dir
-        load_path = merged_ckpt_for_load
+        # If requested, reuse already merged folder when valid
+        reuse_ok = bool(reuse_merged) and os.path.isdir(merged_dir)
+        if reuse_ok:
+            try:
+                has_cfg = os.path.isfile(os.path.join(merged_dir, "config.json"))
+                has_weights = any(fn.endswith(".safetensors") for fn in os.listdir(merged_dir))
+                reuse_ok = has_cfg and has_weights
+            except Exception:
+                reuse_ok = False
+        if reuse_ok:
+            lora_merge_time = 0.0
+            merged_ckpt_for_load = merged_dir
+            load_path = merged_ckpt_for_load
+        else:
+            # Merge in a separate process to avoid keeping model in memory
+            lora_merge_time = _run_merge_child_process(checkpoint_path=local_ckpt_path, save_dir=merged_dir)
+            merged_ckpt_for_load = merged_dir
+            load_path = merged_ckpt_for_load
     else:
         load_path = local_ckpt_path
 
@@ -364,6 +378,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_path", type=str, default=None, help="Checkpoint path (full or LoRA)")
     parser.add_argument("--merge_lora", type=str, default="false", help="Whether to merge LoRA (true/false)")
     parser.add_argument("--save_dir", type=str, default=None, help="Save dir for merged model in merge-child mode")
+    parser.add_argument("--reuse_merged", type=str, default="true", help="Reuse tmp/merged/<run_name> if exists (true/false)")
     args = parser.parse_args()
 
     if args.child:
@@ -379,5 +394,6 @@ if __name__ == "__main__":
         if not args.run_name or not args.checkpoint_path:
             raise SystemExit("--run_name and --checkpoint_path are required")
         ml = str(args.merge_lora).lower() in ("1", "true", "yes")
-        run_benchmark_single(run_name=args.run_name, checkpoint_path=args.checkpoint_path, merge_lora=ml)
+        reuse = str(args.reuse_merged).lower() in ("1", "true", "yes")
+        run_benchmark_single(run_name=args.run_name, checkpoint_path=args.checkpoint_path, merge_lora=ml, reuse_merged=reuse)
 

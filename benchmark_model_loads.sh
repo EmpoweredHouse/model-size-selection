@@ -28,7 +28,7 @@ for i in $(seq 1 "$RUNS"); do
   for entry in "${VARIANTS[@]}"; do
     read -r RUN_NAME CKPT MERGE <<<"$entry"
     echo "--- Variant: $RUN_NAME (merge_lora=$MERGE) ---"
-    BENCHMARK_RUNS=1 python benchmark_model_loads.py --run_name "$RUN_NAME" --checkpoint_path "$CKPT" --merge_lora "$MERGE"
+    BENCHMARK_RUNS=1 python benchmark_model_loads.py --run_name "$RUN_NAME" --checkpoint_path "$CKPT" --merge_lora "$MERGE" --reuse_merged true
     mv model_load_benchmark.json "results/${RUN_NAME//\//_}_iter_${i}.json"
   done
 done
