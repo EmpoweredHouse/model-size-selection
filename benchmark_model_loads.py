@@ -243,50 +243,50 @@ def run_benchmark_single(run_name: str, checkpoint_path: str, merge_lora: bool):
 
     # Prepare the single variant
     local_ckpt_path, tmp_dir = resolve_checkpoint_path(checkpoint_path)
-        ckpt_type = "LoRA" if is_lora_checkpoint(local_ckpt_path) else "full"
+    ckpt_type = "LoRA" if is_lora_checkpoint(local_ckpt_path) else "full"
 
-        lora_merge_time: float = 0.0
-        merged_ckpt_for_load: str = None
+    lora_merge_time: float = 0.0
+    merged_ckpt_for_load: str = None
     if ckpt_type == "LoRA" and merge_lora:
         run_dir_name = _sanitize_name(run_name or os.path.basename(local_ckpt_path))
         merged_dir = os.path.join("tmp", "merged", run_dir_name)
-            # Merge in a separate process to avoid keeping model in memory
-            lora_merge_time = _run_merge_child_process(checkpoint_path=local_ckpt_path, save_dir=merged_dir)
-            merged_ckpt_for_load = merged_dir
-            load_path = merged_ckpt_for_load
-        else:
-            load_path = local_ckpt_path
+        # Merge in a separate process to avoid keeping model in memory
+        lora_merge_time = _run_merge_child_process(checkpoint_path=local_ckpt_path, save_dir=merged_dir)
+        merged_ckpt_for_load = merged_dir
+        load_path = merged_ckpt_for_load
+    else:
+        load_path = local_ckpt_path
 
-        prepared_variants.append({
+    prepared_variants.append({
         "run_name": run_name,
         "checkpoint_path": checkpoint_path,
         "merge_lora": bool(merge_lora),
-            "ckpt_type": ckpt_type,
-            "load_path": load_path,
-            "lora_merge_time": lora_merge_time,
-            "merged_checkpoint_path": merged_ckpt_for_load,
+        "ckpt_type": ckpt_type,
+        "load_path": load_path,
+        "lora_merge_time": lora_merge_time,
+        "merged_checkpoint_path": merged_ckpt_for_load,
     })
 
-        rec = {
+    rec = {
         "run_name": run_name,
         "checkpoint_path": checkpoint_path,
         "merge_lora": bool(merge_lora),
-            "times": [],
-            "avg_time": None,
-            "device": device,
-        }
-        if ckpt_type == "LoRA" and merge_lora:
-            rec["lora_merge_time"] = lora_merge_time
-            rec["merged_checkpoint_path"] = merged_ckpt_for_load
-        results.append(rec)
+        "times": [],
+        "avg_time": None,
+        "device": device,
+    }
+    if ckpt_type == "LoRA" and merge_lora:
+        rec["lora_merge_time"] = lora_merge_time
+        rec["merged_checkpoint_path"] = merged_ckpt_for_load
+    results.append(rec)
 
-        # Cleanup any temporary directory from artifact resolution
-        if tmp_dir and os.path.isdir(tmp_dir):
-            try:
-                import shutil
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-            except Exception:
-                pass
+    # Cleanup any temporary directory from artifact resolution
+    if tmp_dir and os.path.isdir(tmp_dir):
+        try:
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
 
     # Run the single variant BENCHMARK_RUNS times
     for i in range(BENCHMARK_RUNS):
