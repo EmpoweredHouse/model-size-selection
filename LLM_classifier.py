@@ -9,7 +9,6 @@ from dotenv import load_dotenv, find_dotenv
 from openai import OpenAI
 from pydantic import BaseModel, Field
 from sklearn.metrics import accuracy_score, classification_report, f1_score
-import tiktoken
 from tqdm import tqdm
 
 
@@ -172,26 +171,16 @@ def build_user_prompt(batch_items: list[dict] | dict, fewshot_examples: list[dic
     return "\n\n".join(sections)
 
 
-def count_tokens(messages: list[dict], model: str) -> int:
-    """Count tokens in messages for a given model."""
-    try:
-        encoding = tiktoken.encoding_for_model(model)
-    except KeyError:
-        # Fallback to cl100k_base for unknown models (GPT-4, etc.)
-        encoding = tiktoken.get_encoding("cl100k_base")
-    
-    total_tokens = 0
-    for message in messages:
-        # Add tokens for role and content
-        total_tokens += len(encoding.encode(message["role"]))
-        total_tokens += len(encoding.encode(message["content"]))
-        # Add overhead tokens per message (varies by model, using conservative estimate)
-        total_tokens += 4  # Approximate overhead per message
-    
-    # Add overhead for the conversation
-    total_tokens += 2  # Conversation overhead
-    
-    return total_tokens
+def get_attr_or_key(obj, attr_name: str, default=None):
+    """Safely get attribute or dict key from an object, with a default fallback."""
+    if obj is None:
+        return default
+    if hasattr(obj, attr_name):
+        value = getattr(obj, attr_name)
+        return default if value is None else value
+    if isinstance(obj, dict):
+        return obj.get(attr_name, default)
+    return default
 
 
 def _build_minimal_schema(is_single: bool) -> dict:
@@ -225,17 +214,14 @@ def call_openai_classification(
     model: str,
     items: list[dict] | dict,
     fewshot_examples: list[dict]
-) -> tuple[MNLIClassification | BatchMNLIClassification, float, int]:
+) -> tuple[MNLIClassification | BatchMNLIClassification, float, dict[str, int]]:
     messages = [
         {"role": "system", "content": build_system_prompt(items)},
         {"role": "user", "content": build_user_prompt(items, fewshot_examples)},
     ]
-    print(messages)
+    # print(messages)
     is_single = isinstance(items, dict)
     minimal_schema = _build_minimal_schema(is_single)
-    
-    # Count input tokens
-    input_tokens = count_tokens(messages, model)
     
     # Measure time from request to response
     start_time = time.time()
@@ -254,28 +240,39 @@ def call_openai_classification(
     )
     end_time = time.time()
     total_time = end_time - start_time
-
+    print(completion)
     message = completion.choices[0].message
+    raw_content = getattr(message, "content", None)
     parsed_obj = getattr(message, "parsed", None)
+    # print(completion)
     if parsed_obj is None:
-        content = getattr(message, "content", None)
-        parsed_obj = json.loads(content)
+        # When strict JSON schema is used, content should contain JSON
+        # Fallback to empty dict string to avoid crashes in extreme cases
+        content_to_parse = raw_content if raw_content is not None else "{}"
+        parsed_obj = json.loads(content_to_parse)
 
-    # Count output tokens (approximate)
-    response_content = content if parsed_obj is None else message.content
-    if response_content:
-        try:
-            encoding = tiktoken.encoding_for_model(model)
-        except KeyError:
-            encoding = tiktoken.get_encoding("cl100k_base")
-        output_tokens = len(encoding.encode(response_content))
-    else:
-        output_tokens = 0
-    
-    total_tokens = input_tokens + output_tokens
-    
+    # Use API-provided token usage (GPT-4o/GPT-5). No manual fallback.
+    usage = getattr(completion, "usage", None)
+    prompt_tokens = 0
+    completion_tokens = 0
+    cached_tokens = 0
+    total_tokens = 0
+    if usage is not None:
+        prompt_tokens = get_attr_or_key(usage, "prompt_tokens", 0) or 0
+        completion_tokens = get_attr_or_key(usage, "completion_tokens", 0) or 0
+        total_tokens = get_attr_or_key(usage, "total_tokens", prompt_tokens + completion_tokens) or (prompt_tokens + completion_tokens)
+        prompt_tokens_details = get_attr_or_key(usage, "prompt_tokens_details", None)
+        cached_tokens = get_attr_or_key(prompt_tokens_details, "cached_tokens", 0) or 0
+    # If usage is None, tokens remain 0; leave as-is.
+
     result = MNLIClassification(**parsed_obj) if is_single else BatchMNLIClassification(**parsed_obj)
-    return result, total_time, total_tokens
+    tokens_breakdown = {
+        "prompt_tokens": int(prompt_tokens),
+        "completion_tokens": int(completion_tokens),
+        "cached_tokens": int(cached_tokens),
+        "total_tokens": int(total_tokens),
+    }
+    return result, total_time, tokens_breakdown
 
 
 def run_classification(
@@ -286,7 +283,7 @@ def run_classification(
     max_batches: int | None = None,
     batch_size: int = 20, 
     present_results: Literal["file", "console", "none"] = "console",
-) -> tuple[float, int]:
+) -> tuple[float, dict[str, int]]:
     load_dotenv(find_dotenv())
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -298,7 +295,7 @@ def run_classification(
 
     results: list[MNLIClassification] = []
     times: list[float] = []
-    total_tokens = 0
+    token_sums: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0, "total_tokens": 0}
     fewshot_examples = get_fewshot_examples()
 
     if classification_mode == "batch":
@@ -315,7 +312,10 @@ def run_classification(
                 raise TypeError("Expected BatchMNLIClassification in batch mode")
             results.extend(parsed.classifications)
             times.append(request_time)
-            total_tokens += request_tokens
+            token_sums["prompt_tokens"] += request_tokens.get("prompt_tokens", 0)
+            token_sums["completion_tokens"] += request_tokens.get("completion_tokens", 0)
+            token_sums["cached_tokens"] += request_tokens.get("cached_tokens", 0)
+            token_sums["total_tokens"] += request_tokens.get("total_tokens", 0)
     else:
         total = len(test_inputs)
         end_index = total if max_examples is None else min(max_examples, total)
@@ -326,7 +326,10 @@ def run_classification(
                 raise TypeError("Expected MNLIClassification in single mode")
             results.append(parsed_single)
             times.append(request_time)
-            total_tokens += request_tokens
+            token_sums["prompt_tokens"] += request_tokens.get("prompt_tokens", 0)
+            token_sums["completion_tokens"] += request_tokens.get("completion_tokens", 0)
+            token_sums["cached_tokens"] += request_tokens.get("cached_tokens", 0)
+            token_sums["total_tokens"] += request_tokens.get("total_tokens", 0)
 
     y_pred: list[int] = []
     for result in results:
@@ -339,7 +342,7 @@ def run_classification(
     # Basic evaluation
     acc = accuracy_score(y_true, y_pred)
     f1_macro = f1_score(y_true, y_pred, average="macro")
-    metrics_str = f"Accuracy: {acc:.4f}\nF1 Macro: {f1_macro:.4f}\nAvg Time: {avg_time:.4f}s\nTotal Tokens: {total_tokens}"
+    metrics_str = f"Accuracy: {acc:.4f}\nF1 Macro: {f1_macro:.4f}\nAvg Time: {avg_time:.4f}s\nTotal Tokens: {token_sums['total_tokens']}"
     classification_report_str = classification_report(y_true, y_pred, digits=4)
     comparison_str = classification_comparison(test_ds, results)
     if present_results == "console":
@@ -354,7 +357,7 @@ def run_classification(
     else:
         pass
     
-    return avg_time, total_tokens
+    return avg_time, token_sums
 
 
 if __name__ == "__main__":
@@ -382,11 +385,17 @@ if __name__ == "__main__":
     timing_results = {
         "single_1000_avg": {
             "avg_total_time": round(single_time, 3),
-            "total_tokens": single_tokens
+            "prompt_tokens": single_tokens.get("prompt_tokens", 0),
+            "completion_tokens": single_tokens.get("completion_tokens", 0),
+            "cached_tokens": single_tokens.get("cached_tokens", 0),
+            "total_tokens": single_tokens.get("total_tokens", 0),
         },
         "batch10_100_avg": {
             "avg_total_time": round(batch_time, 3),
-            "total_tokens": batch_tokens
+            "prompt_tokens": batch_tokens.get("prompt_tokens", 0),
+            "completion_tokens": batch_tokens.get("completion_tokens", 0),
+            "cached_tokens": batch_tokens.get("cached_tokens", 0),
+            "total_tokens": batch_tokens.get("total_tokens", 0),
         }
     }
     
