@@ -1,0 +1,138 @@
+{
+    "DistilBERT-full": {
+        "training": {
+            "gpu_name": "L4-24GB",
+            "gpu_cost_hr_$": "0.39",
+            "total_time_hr": "0.66",
+            "training_cost_$": "0.26"
+        },
+        "inference": {
+            "gpu_name": "L4-24GB",
+            "gpu_cost_s_$": "0.00019",
+            "warm_1_in_single_avg": "1.47",
+            "cost_1": "0.0003",
+            "warm_100_in_batch_avg": "1.47",
+            "cost_100": "0.0003",
+            "model_load_time": "2.2"
+        }
+    },
+    "DistilBERT-lora": {
+        "training": {
+            "gpu_name": "L4-24GB",
+            "gpu_cost_hr_$": "0.39",
+            "total_time_hr": "0.96",
+            "training_cost_$": "0.37"
+        },
+        "inference": {
+            "gpu_name": "L4-24GB",
+            "gpu_cost_s_$": "0.00019",
+            "warm_1_in_single_avg": "1.49",
+            "cost_1": "0.0003",
+            "warm_100_in_batch_avg": "1.51",
+            "cost_100": "0.0003",
+            "model_load_time": "2.2"
+        }
+    },
+    "RoBERTa-full": {
+        "training": {
+            "gpu_name": "L4-24GB",
+            "gpu_cost_hr_$": "0.39",
+            "total_time_hr": "0.97",
+            "training_cost_$": "0.38"
+        },
+        "inference": {
+            "gpu_name": "L4-24GB",
+            "gpu_cost_s_$": "0.00019",
+            "warm_1_in_single_avg": "1.49",
+            "cost_1": "0.0003",
+            "warm_100_in_batch_avg": "1.54",
+            "cost_100": "0.0003",
+            "model_load_time": "4"
+        }
+    },
+    "RoBERTa-lora": {
+        "training": {
+            "gpu_name": "L4-24GB",
+            "gpu_cost_hr_$": "0.39",
+            "total_time_hr": "1.2",
+            "training_cost_$": "0.47"
+        },
+        "inference": {
+            "gpu_name": "L4-24GB",
+            "gpu_cost_s_$": "0.00019",
+            "warm_1_in_single_avg": "1.46",
+            "cost_1": "0.0003",
+            "warm_100_in_batch_avg": "1.46",
+            "cost_100": "0.0003",
+            "model_load_time": "4"
+        }
+    },
+    "DeBERTa-v2-xlarge-full": {
+        "training": {
+            "gpu_name": "A40-48GB",
+            "gpu_cost_hr_$": "0.4",
+            "total_time_hr": "2.9",
+            "training_cost_$": "1.16"
+        },
+        "inference": {
+            "gpu_name": "L4-24GB",
+            "gpu_cost_s_$": "0.00019",
+            "warm_1_in_single_avg": "1.471",
+            "cost_1": "0.0003",
+            "warm_100_in_batch_avg": "1.48",
+            "cost_100": "0.0003",
+            "model_load_time": "13.7"
+        }
+    },
+    "DeBERTa-v2-xlarge-lora": {
+        "training": {
+            "gpu_name": "A40-48GB",
+            "gpu_cost_hr_$": "0.4",
+            "total_time_hr": "8.3",
+            "training_cost_$": "3.32"
+        },
+        "inference": {
+            "gpu_name": "L4-24GB",
+            "gpu_cost_s_$": "0.00019",
+            "warm_1_in_single_avg": "1.27",
+            "cost_1": "0.0002",
+            "warm_100_in_batch_avg": "1.30",
+            "cost_100": "0.0002",
+            "model_load_time": "13.7"
+        }
+    },
+    "Gemma2B-lora": {
+        "training": {
+            "gpu_name": "A40-48GB",
+            "gpu_cost_hr_$": "0.4",
+            "total_time_hr": "4.6",
+            "training_cost_$": "1.84"
+        },
+        "inference": {
+            "gpu_name": "L4-24GB",
+            "gpu_cost_s_$": "0.00019",
+            "warm_1_in_single_avg": "1.29",
+            "cost_1": "0.0002",
+            "warm_100_in_batch_avg": "1.27",
+            "cost_100": "0.0002",
+            "model_load_time": "36.3"
+        }
+    },
+    "Gemma7B-lora": {
+        "training": {
+            "gpu_name": "A100-80GB",
+            "gpu_cost_hr_$": "1.74",
+            "total_time_hr": "7.8",
+            "training_cost_$": "13.52"
+        },
+        "inference": {
+            "gpu_name": "L4-24GB",
+            "gpu_cost_s_$": "0.00019",
+            "warm_1_in_single_avg": "1.47",
+            "cost_1": "0.0003",
+            "warm_100_in_batch_avg": "5.637",
+            "cost_100": "0.0011",
+            "model_load_time": "76.2"
+        }
+    }
+}
